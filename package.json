@@ -1,8 +1,11 @@
 {
   "name": "miapp-servidor",
   "version": "1.0.0",
-  "main": "server.js",
   "type": "commonjs",
+  "main": "server.js",        // <--- Añade esto
+  "scripts": {                // <--- Añade esta sección
+    "start": "node server.js" // <--- Este es el comando que inicia tu app
+  },                          // <--- Cierra la sección scripts
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.21.2",
