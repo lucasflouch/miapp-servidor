@@ -70,7 +70,7 @@ app.post("/api/register", async (req, res) => {
     await dbRun("INSERT INTO usuarios (id, nombre, email, password, telefono, verificationCode) VALUES (?, ?, ?, ?, ?, ?)", 
         [newUserId, nombre, email, password, telefono || null, verificationCode]);
     
-    res.status(201).json({ message: 'Registro exitoso. Se requiere verificación.', email: email });
+    res.status(201).json({ message: 'Registro exitoso. Se requiere verificación.', email: email, verificationCode: verificationCode });
 });
 
 app.post("/api/verify", async (req, res) => {
