@@ -1,5 +1,5 @@
 // server.js
-console.log('--- EJECUTANDO SERVIDOR DE API v5 (Inicio Inmediato) ---');
+console.log('--- EJECUTANDO SERVIDOR DE API v6 (Fallback de Contraseña) ---');
 
 const express = require("express");
 const cors = require("cors");
@@ -8,49 +8,31 @@ const path = require("path");
 const { initialData } = require('./mockData.js');
 
 const app = express();
-// Render prefiere el puerto 10000, lo usamos como default.
 const PORT = process.env.PORT || 10000;
 
-// --- ESTADO GLOBAL DEL SERVIDOR ---
 let isDbReady = false;
 let dbError = null;
-let db; // Hacemos la variable de la DB accesible globalmente
+let db;
 
-// --- MIDDLEWARE ---
 app.use(cors({ origin: "*" }));
 app.use(express.json({ limit: "10mb" }));
 
-// Middleware para registrar cada petición entrante
 app.use((req, res, next) => {
   console.log(`[PETICIÓN] ${req.method} ${req.originalUrl}`);
   next();
 });
 
-// Middleware CRÍTICO: Chequea si la base de datos está lista antes de procesar la petición.
 app.use((req, res, next) => {
-  // La ruta de diagnóstico /api/health SIEMPRE debe funcionar, sin importar el estado de la DB.
-  if (req.path === '/api/health') {
-    return next();
-  }
-  // Si hubo un error irrecuperable en la DB, rechazamos todas las peticiones.
-  if (dbError) {
-    return res.status(503).json({ error: "Error crítico en la base de datos.", details: dbError.message });
-  }
-  // Si la DB todavía se está inicializando, le pedimos al cliente que espere.
-  if (!isDbReady) {
-    return res.status(503).json({ error: "El servidor se está iniciando, la base de datos aún no está lista. Intente de nuevo en un momento." });
-  }
-  // Si todo está bien, continuamos a la ruta solicitada.
+  if (req.path === '/api/health') return next();
+  if (dbError) return res.status(503).json({ error: "Error crítico en la base de datos.", details: dbError.message });
+  if (!isDbReady) return res.status(503).json({ error: "El servidor se está iniciando, la base de datos aún no está lista. Intente de nuevo en un momento." });
   next();
 });
 
-// --- RUTAS DE LA API ---
-
-// Ruta de diagnóstico mejorada para mostrar el estado real del servidor.
 app.get("/api/health", (req, res) => {
   res.status(200).json({
     status: isDbReady ? "ok" : "initializing",
-    message: `Servidor v5 activo. Estado de la DB: ${isDbReady ? 'Lista' : 'Iniciando'}`,
+    message: `Servidor v6 activo. Estado de la DB: ${isDbReady ? 'Lista' : 'Iniciando'}`,
     dbError: dbError ? dbError.message : null,
     timestamp: new Date().toISOString(),
   });
@@ -164,36 +146,34 @@ app.delete("/api/comercios/:id", async (req, res) => {
 });
 
 app.post("/api/reset-data", async (req, res) => {
-    // Para resetear, marcamos la DB como "no lista" y la reiniciamos.
     isDbReady = false;
+    dbError = null;
     console.log("Iniciando reseteo de la base de datos...");
-    await setupDatabaseAndData();
-    isDbReady = true;
-    console.log("Reseteo de la base de datos completado.");
-    res.status(200).json({ message: "Base de datos reseteada con éxito." });
+    try {
+      await setupDatabaseAndData();
+      isDbReady = true;
+      console.log("Reseteo de la base de datos completado.");
+      res.status(200).json({ message: "Base de datos reseteada con éxito." });
+    } catch(err) {
+      dbError = err;
+      console.error("Fallo el reseteo de la base de datos:", err.message);
+      res.status(500).json({ error: "No se pudo resetear la base de datos." });
+    }
 });
 
-// Manejador 404: Se activa si ninguna de las rutas anteriores coincide.
 app.use((req, res) => {
   console.log(`[404] RUTA NO ENCONTRADA POR EL SERVIDOR: ${req.method} ${req.originalUrl}`);
   res.status(404).json({
     error: `Ruta no encontrada en el servidor: ${req.method} ${req.originalUrl}`,
-    message: "La ruta que estás buscando no existe. (v5)"
+    message: "La ruta que estás buscando no existe. (v6)"
   });
 });
 
-
-// --- INICIO DEL SERVIDOR (ESTRATEGIA DE INICIO INMEDIATO) ---
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Servidor v5 escuchando en el puerto ${PORT}. Iniciando conexión con la base de datos en segundo plano...`);
-  // Ahora que el servidor está escuchando, preparamos la DB.
+  console.log(`Servidor v6 escuchando en el puerto ${PORT}. Iniciando conexión con la base de datos en segundo plano...`);
   initializeDatabase();
 });
 
-
-// --- LÓGICA DE LA BASE DE DATOS ---
-
-// Función para conectar a la DB y luego llamar al setup.
 function initializeDatabase() {
     const dbPath = path.resolve(__dirname, "guia_comercial.db");
     db = new sqlite3.Database(dbPath, async (err) => {
@@ -206,26 +186,18 @@ function initializeDatabase() {
         
         try {
             await setupDatabaseAndData();
-            isDbReady = true; // Marcamos la DB como lista.
+            isDbReady = true;
             console.log("¡ÉXITO! Base de datos lista y servidor completamente operativo.");
         } catch (setupErr) {
-            console.error("Error fatal durante el setup de la DB:", setupErr.message);
+            console.error("Error fatal durante el setup de la DB:", setupErr.message, setupErr.stack);
             dbError = setupErr;
         }
     });
 }
 
-const dbRun = (sql, params = []) => new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) {
-        if (err) reject(err); else resolve({ lastID: this.lastID, changes: this.changes });
-    });
-});
-const dbAll = (sql, params = []) => new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => { if (err) reject(err); else resolve(rows); });
-});
-const dbGet = (sql, params = []) => new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => { if (err) reject(err); else resolve(row); });
-});
+const dbRun = (sql, params = []) => new Promise((resolve, reject) => db.run(sql, params, function (err) { if (err) reject(err); else resolve({ lastID: this.lastID, changes: this.changes }); }));
+const dbAll = (sql, params = []) => new Promise((resolve, reject) => db.all(sql, params, (err, rows) => { if (err) reject(err); else resolve(rows); }));
+const dbGet = (sql, params = []) => new Promise((resolve, reject) => db.get(sql, params, (err, row) => { if (err) reject(err); else resolve(row); }));
 
 const setupDatabaseAndData = async () => {
     try {
@@ -246,7 +218,14 @@ const setupDatabaseAndData = async () => {
         for (const p of provincias) await dbRun("INSERT INTO provincias (id, nombre) VALUES (?, ?)", [p.id, p.nombre]);
         for (const c of ciudades) await dbRun("INSERT INTO ciudades (id, nombre, provinciaId) VALUES (?, ?, ?)", [c.id, c.nombre, c.provinciaId]);
         for (const r of rubros) await dbRun("INSERT INTO rubros (id, nombre, icon) VALUES (?, ?, ?)", [r.id, r.nombre, r.icon]);
-        for (const u of usuarios) await dbRun("INSERT INTO usuarios (id, nombre, email, password, telefono, isVerified) VALUES (?, ?, ?, ?, ?, 1)", [u.id, u.nombre, u.email, u.password, u.telefono || null]);
+        
+        for (const u of usuarios) {
+            // SOLUCIÓN: Si la contraseña no viene en los datos de prueba, se asigna una por defecto.
+            const password = u.password || 'password123';
+            await dbRun("INSERT INTO usuarios (id, nombre, email, password, telefono, isVerified) VALUES (?, ?, ?, ?, ?, 1)", 
+            [u.id, u.nombre, u.email, password, u.telefono || null]);
+        }
+
         for (const c of comercios) {
           const galeriaJson = c.galeriaImagenes ? JSON.stringify(c.galeriaImagenes) : '[]';
           await dbRun("INSERT INTO comercios (id, nombre, imagenUrl, rubroId, provinciaId, provinciaNombre, ciudadId, ciudadNombre, usuarioId, whatsapp, direccion, googleMapsUrl, websiteUrl, description, galeriaImagenes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
