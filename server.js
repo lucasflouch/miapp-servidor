@@ -1,5 +1,5 @@
 // server.js
-console.log('--- EJECUTANDO SERVIDOR DE API ---');
+console.log('--- EJECUTANDO SERVIDOR DE API v5 (Inicio Inmediato) ---');
 
 const express = require("express");
 const cors = require("cors");
@@ -8,100 +8,50 @@ const path = require("path");
 const { initialData } = require('./mockData.js');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+// Render prefiere el puerto 10000, lo usamos como default.
+const PORT = process.env.PORT || 10000;
 
-// --- MIDDLEWARE DE LOGGING ---
-app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] PeticiÃ³n recibida: ${req.method} ${req.originalUrl}`);
-  next();
-});
+// --- ESTADO GLOBAL DEL SERVIDOR ---
+let isDbReady = false;
+let dbError = null;
+let db; // Hacemos la variable de la DB accesible globalmente
 
-// --- CONFIGURACIÃ“N MIDDLEWARE ---
+// --- MIDDLEWARE ---
 app.use(cors({ origin: "*" }));
 app.use(express.json({ limit: "10mb" }));
 
-// --- CONEXIÃ“N A LA BASE DE DATOS ---
-const dbPath = path.resolve(__dirname, "guia_comercial.db");
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error("Error fatal al conectar con la DB:", err.message);
-    process.exit(1);
+// Middleware para registrar cada petición entrante
+app.use((req, res, next) => {
+  console.log(`[PETICIÓN] ${req.method} ${req.originalUrl}`);
+  next();
+});
+
+// Middleware CRÍTICO: Chequea si la base de datos está lista antes de procesar la petición.
+app.use((req, res, next) => {
+  // La ruta de diagnóstico /api/health SIEMPRE debe funcionar, sin importar el estado de la DB.
+  if (req.path === '/api/health') {
+    return next();
   }
-  console.log("Conectado a la base de datos SQLite en", dbPath);
-  
-  // Iniciar servidor solo despuÃ©s de que la DB estÃ© lista.
-  setupDatabaseAndData()
-    .then(() => {
-      app.listen(PORT, "0.0.0.0", () => {
-        console.log(`Servidor de API activo y accesible pÃºblicamente en el puerto ${PORT}`);
-      });
-    })
-    .catch(error => {
-      console.error("No se pudo iniciar el servidor por un error en la base de datos.", error);
-      process.exit(1);
-    });
+  // Si hubo un error irrecuperable en la DB, rechazamos todas las peticiones.
+  if (dbError) {
+    return res.status(503).json({ error: "Error crítico en la base de datos.", details: dbError.message });
+  }
+  // Si la DB todavía se está inicializando, le pedimos al cliente que espere.
+  if (!isDbReady) {
+    return res.status(503).json({ error: "El servidor se está iniciando, la base de datos aún no está lista. Intente de nuevo en un momento." });
+  }
+  // Si todo está bien, continuamos a la ruta solicitada.
+  next();
 });
-
-// --- HELPERS DE BASE DE DATOS PROMISIFICADOS ---
-const dbRun = (sql, params = []) => new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) {
-        if (err) reject(err);
-        else resolve({ lastID: this.lastID, changes: this.changes });
-    });
-});
-const dbAll = (sql, params = []) => new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows);
-    });
-});
-const dbGet = (sql, params = []) => new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-    });
-});
-
-// --- FUNCIÃ“N PARA CREAR Y POBLAR LA DB ---
-const setupDatabaseAndData = async () => {
-    try {
-        await dbRun("DROP TABLE IF EXISTS provincias");
-        await dbRun("DROP TABLE IF EXISTS ciudades");
-        await dbRun("DROP TABLE IF EXISTS rubros");
-        await dbRun("DROP TABLE IF EXISTS usuarios");
-        await dbRun("DROP TABLE IF EXISTS comercios");
-        
-        await dbRun("CREATE TABLE IF NOT EXISTS provincias (id TEXT PRIMARY KEY, nombre TEXT NOT NULL)");
-        await dbRun("CREATE TABLE IF NOT EXISTS ciudades (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, provinciaId TEXT NOT NULL)");
-        await dbRun("CREATE TABLE IF NOT EXISTS rubros (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, icon TEXT)");
-        await dbRun(`CREATE TABLE IF NOT EXISTS usuarios (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, email TEXT UNIQUE, password TEXT NOT NULL, telefono TEXT, isVerified INTEGER DEFAULT 0, verificationCode TEXT)`);
-        await dbRun(`CREATE TABLE IF NOT EXISTS comercios (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, imagenUrl TEXT, rubroId TEXT, provinciaId TEXT, provinciaNombre TEXT, ciudadId TEXT, ciudadNombre TEXT, usuarioId TEXT NOT NULL, whatsapp TEXT NOT NULL, direccion TEXT, googleMapsUrl TEXT, websiteUrl TEXT, description TEXT, galeriaImagenes TEXT)`);
-        
-        console.log("Tablas creadas con Ã©xito.");
-        
-        const { provincias, ciudades, rubros, usuarios, comercios } = initialData;
-        for (const p of provincias) await dbRun("INSERT OR IGNORE INTO provincias (id, nombre) VALUES (?, ?)", [p.id, p.nombre]);
-        for (const c of ciudades) await dbRun("INSERT OR IGNORE INTO ciudades (id, nombre, provinciaId) VALUES (?, ?, ?)", [c.id, c.nombre, c.provinciaId]);
-        for (const r of rubros) await dbRun("INSERT OR IGNORE INTO rubros (id, nombre, icon) VALUES (?, ?, ?)", [r.id, r.nombre, r.icon]);
-        for (const u of usuarios) await dbRun("INSERT OR IGNORE INTO usuarios (id, nombre, email, password, telefono, isVerified) VALUES (?, ?, ?, ?, ?, 1)", [u.id, u.nombre, u.email, u.password, u.telefono || null]);
-        for (const c of comercios) {
-          const galeriaJson = c.galeriaImagenes ? JSON.stringify(c.galeriaImagenes) : '[]';
-          await dbRun("INSERT OR IGNORE INTO comercios (id, nombre, imagenUrl, rubroId, provinciaId, provinciaNombre, ciudadId, ciudadNombre, usuarioId, whatsapp, direccion, googleMapsUrl, websiteUrl, description, galeriaImagenes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
-          [c.id, c.nombre, c.imagenUrl, c.rubroId, c.provinciaId, c.provinciaNombre, c.ciudadId, c.ciudadNombre, c.usuarioId, c.whatsapp, c.direccion, c.googleMapsUrl, c.websiteUrl, c.description, galeriaJson]);
-        }
-        console.log("Base de datos lista para recibir conexiones.");
-    } catch (err) {
-        console.error("Error fatal durante el setup de la DB:", err.message);
-        throw err;
-    }
-};
 
 // --- RUTAS DE LA API ---
 
+// Ruta de diagnóstico mejorada para mostrar el estado real del servidor.
 app.get("/api/health", (req, res) => {
   res.status(200).json({
-    status: "ok",
-    message: "Servidor activo y saludable! v2", // Mensaje actualizado para confirmar el despliegue
+    status: isDbReady ? "ok" : "initializing",
+    message: `Servidor v5 activo. Estado de la DB: ${isDbReady ? 'Lista' : 'Iniciando'}`,
+    dbError: dbError ? dbError.message : null,
     timestamp: new Date().toISOString(),
   });
 });
@@ -126,29 +76,29 @@ app.get("/api/data", async (req, res) => {
 
 app.post("/api/register", async (req, res) => {
     const { nombre, email, password, telefono } = req.body;
-    if (!nombre || !email || !password) return res.status(400).json({ error: "Nombre, email y contraseÃ±a son requeridos." });
+    if (!nombre || !email || !password) return res.status(400).json({ error: "Nombre, email y contraseña son requeridos." });
     
     const existingUser = await dbGet("SELECT * FROM usuarios WHERE email = ?", [email]);
-    if (existingUser) return res.status(409).json({ error: "El email ya estÃ¡ registrado." });
+    if (existingUser) return res.status(409).json({ error: "El email ya está registrado." });
 
     const newUserId = generateId();
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-    console.log(`--- CÃ“DIGO DE VERIFICACIÃ“N PARA ${email}: ${verificationCode} ---`);
+    console.log(`--- CÓDIGO DE VERIFICACIÓN PARA ${email}: ${verificationCode} ---`);
     
     await dbRun("INSERT INTO usuarios (id, nombre, email, password, telefono, verificationCode) VALUES (?, ?, ?, ?, ?, ?)", 
         [newUserId, nombre, email, password, telefono || null, verificationCode]);
     
-    res.status(201).json({ message: 'Registro exitoso. Se requiere verificaciÃ³n.', email: email });
+    res.status(201).json({ message: 'Registro exitoso. Se requiere verificación.', email: email });
 });
 
 app.post("/api/verify", async (req, res) => {
     const { email, code } = req.body;
-    if (!email || !code) return res.status(400).json({ error: "Email y cÃ³digo son requeridos." });
+    if (!email || !code) return res.status(400).json({ error: "Email y código son requeridos." });
 
     const user = await dbGet("SELECT * FROM usuarios WHERE email = ?", [email]);
     if (!user) return res.status(404).json({ error: "Usuario no encontrado." });
     if (user.isVerified) return res.status(400).json({ error: "Esta cuenta ya ha sido verificada." });
-    if (user.verificationCode !== code) return res.status(400).json({ error: "El cÃ³digo de verificaciÃ³n es incorrecto." });
+    if (user.verificationCode !== code) return res.status(400).json({ error: "El código de verificación es incorrecto." });
 
     await dbRun("UPDATE usuarios SET isVerified = 1, verificationCode = NULL WHERE id = ?", [user.id]);
     const { password: _, ...verifiedUser } = user;
@@ -157,10 +107,10 @@ app.post("/api/verify", async (req, res) => {
 
 app.post("/api/login", async (req, res) => {
     const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ error: "Email y contraseÃ±a son requeridos." });
+    if (!email || !password) return res.status(400).json({ error: "Email y contraseña son requeridos." });
     
     const user = await dbGet("SELECT * FROM usuarios WHERE email = ?", [email]);
-    if (!user || user.password !== password) return res.status(401).json({ error: "Credenciales invÃ¡lidas." });
+    if (!user || user.password !== password) return res.status(401).json({ error: "Credenciales inválidas." });
     if (!user.isVerified) return res.status(403).json({ error: "Tu cuenta no ha sido verificada." });
 
     const { password: _, verificationCode: __, ...userToReturn } = user;
@@ -210,24 +160,104 @@ app.put("/api/comercios/:id", async (req, res) => {
 app.delete("/api/comercios/:id", async (req, res) => {
     const { id } = req.params;
     await dbRun("DELETE FROM comercios WHERE id = ?", [id]);
-    res.status(200).json({ message: "Comercio eliminado con Ã©xito." });
+    res.status(200).json({ message: "Comercio eliminado con éxito." });
 });
 
 app.post("/api/reset-data", async (req, res) => {
+    // Para resetear, marcamos la DB como "no lista" y la reiniciamos.
+    isDbReady = false;
+    console.log("Iniciando reseteo de la base de datos...");
     await setupDatabaseAndData();
-    res.status(200).json({ message: "Base de datos reseteada con Ã©xito." });
+    isDbReady = true;
+    console.log("Reseteo de la base de datos completado.");
+    res.status(200).json({ message: "Base de datos reseteada con éxito." });
 });
 
-// --- MANEJADOR 404 PERSONALIZADO (IMPORTANTE: VA AL FINAL) ---
+// Manejador 404: Se activa si ninguna de las rutas anteriores coincide.
 app.use((req, res) => {
-  console.log(`[404] Ruta no encontrada: ${req.method} ${req.originalUrl}`);
+  console.log(`[404] RUTA NO ENCONTRADA POR EL SERVIDOR: ${req.method} ${req.originalUrl}`);
   res.status(404).json({
-    error: `Ruta no encontrada: ${req.method} ${req.originalUrl}`,
-    message: "La ruta que estÃ¡s buscando no existe en este servidor. (v2)"
+    error: `Ruta no encontrada en el servidor: ${req.method} ${req.originalUrl}`,
+    message: "La ruta que estás buscando no existe. (v5)"
   });
 });
 
-// --- FUNCIÃ“N UTILITARIA ---
+
+// --- INICIO DEL SERVIDOR (ESTRATEGIA DE INICIO INMEDIATO) ---
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Servidor v5 escuchando en el puerto ${PORT}. Iniciando conexión con la base de datos en segundo plano...`);
+  // Ahora que el servidor está escuchando, preparamos la DB.
+  initializeDatabase();
+});
+
+
+// --- LÓGICA DE LA BASE DE DATOS ---
+
+// Función para conectar a la DB y luego llamar al setup.
+function initializeDatabase() {
+    const dbPath = path.resolve(__dirname, "guia_comercial.db");
+    db = new sqlite3.Database(dbPath, async (err) => {
+        if (err) {
+            console.error("Error fatal al conectar con la DB:", err.message);
+            dbError = err;
+            return;
+        }
+        console.log("Conectado a la base de datos SQLite en", dbPath);
+        
+        try {
+            await setupDatabaseAndData();
+            isDbReady = true; // Marcamos la DB como lista.
+            console.log("¡ÉXITO! Base de datos lista y servidor completamente operativo.");
+        } catch (setupErr) {
+            console.error("Error fatal durante el setup de la DB:", setupErr.message);
+            dbError = setupErr;
+        }
+    });
+}
+
+const dbRun = (sql, params = []) => new Promise((resolve, reject) => {
+    db.run(sql, params, function (err) {
+        if (err) reject(err); else resolve({ lastID: this.lastID, changes: this.changes });
+    });
+});
+const dbAll = (sql, params = []) => new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => { if (err) reject(err); else resolve(rows); });
+});
+const dbGet = (sql, params = []) => new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => { if (err) reject(err); else resolve(row); });
+});
+
+const setupDatabaseAndData = async () => {
+    try {
+        console.log("Limpiando base de datos antigua para actualizar esquema...");
+        const tables = ["provincias", "ciudades", "rubros", "usuarios", "comercios"];
+        for (const table of tables) { await dbRun(`DROP TABLE IF EXISTS ${table}`); }
+        
+        console.log("Esquema limpio. Creando tablas nuevas...");
+        await dbRun("CREATE TABLE provincias (id TEXT PRIMARY KEY, nombre TEXT NOT NULL)");
+        await dbRun("CREATE TABLE ciudades (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, provinciaId TEXT NOT NULL)");
+        await dbRun("CREATE TABLE rubros (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, icon TEXT)");
+        await dbRun(`CREATE TABLE usuarios (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, email TEXT UNIQUE, password TEXT NOT NULL, telefono TEXT, isVerified INTEGER DEFAULT 0, verificationCode TEXT)`);
+        await dbRun(`CREATE TABLE comercios (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, imagenUrl TEXT, rubroId TEXT, provinciaId TEXT, provinciaNombre TEXT, ciudadId TEXT, ciudadNombre TEXT, usuarioId TEXT NOT NULL, whatsapp TEXT NOT NULL, direccion TEXT, googleMapsUrl TEXT, websiteUrl TEXT, description TEXT, galeriaImagenes TEXT)`);
+        
+        console.log("Tablas creadas con éxito. Poblando con datos iniciales...");
+        
+        const { provincias, ciudades, rubros, usuarios, comercios } = initialData;
+        for (const p of provincias) await dbRun("INSERT INTO provincias (id, nombre) VALUES (?, ?)", [p.id, p.nombre]);
+        for (const c of ciudades) await dbRun("INSERT INTO ciudades (id, nombre, provinciaId) VALUES (?, ?, ?)", [c.id, c.nombre, c.provinciaId]);
+        for (const r of rubros) await dbRun("INSERT INTO rubros (id, nombre, icon) VALUES (?, ?, ?)", [r.id, r.nombre, r.icon]);
+        for (const u of usuarios) await dbRun("INSERT INTO usuarios (id, nombre, email, password, telefono, isVerified) VALUES (?, ?, ?, ?, ?, 1)", [u.id, u.nombre, u.email, u.password, u.telefono || null]);
+        for (const c of comercios) {
+          const galeriaJson = c.galeriaImagenes ? JSON.stringify(c.galeriaImagenes) : '[]';
+          await dbRun("INSERT INTO comercios (id, nombre, imagenUrl, rubroId, provinciaId, provinciaNombre, ciudadId, ciudadNombre, usuarioId, whatsapp, direccion, googleMapsUrl, websiteUrl, description, galeriaImagenes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+          [c.id, c.nombre, c.imagenUrl, c.rubroId, c.provinciaId, c.provinciaNombre, c.ciudadId, c.ciudadNombre, c.usuarioId, c.whatsapp, c.direccion, c.googleMapsUrl, c.websiteUrl, c.description, galeriaJson]);
+        }
+    } catch (err) {
+        console.error("Error en setupDatabaseAndData:", err.message);
+        throw err;
+    }
+};
+
 function generateId() {
     return Math.random().toString(36).substring(2, 9);
 }
