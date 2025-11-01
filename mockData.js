@@ -49,40 +49,85 @@ const initialData = {
     { id: 'r1', nombre: 'Gastronomía', icon: '🍔' },
     { id: 'r2', nombre: 'Indumentaria y Accesorios', icon: '👕' },
     { id: 'r3', nombre: 'Tecnología', icon: '💻' },
-    { id: 'r4', nombre: 'Servicios Profesionales y Oficios', icon: '🛠️' },
+    { id: 'r4', nombre: 'Profesionales y Oficios', icon: '🛠️' },
     { id: 'r5', nombre: 'Turismo y Hotelería', icon: '✈️' },
     { id: 'r6', nombre: 'Hogar y Construcción', icon: '🏠' },
-    { id: 'r7', nombre: 'Salud y Belleza', icon: '💅' },
+    { id: 'r7', nombre: 'Salud', icon: '⚕️' },
+    { id: 'r8', nombre: 'Belleza', icon: '💅' },
+    { id: 'r9', nombre: 'Vehículos y Propiedades', icon: '🚗' },
   ],
   subRubros: [
-    // Gastronomía
+    // Gastronomía (r1)
     { id: 'sr1', nombre: 'Restaurante', rubroId: 'r1' },
     { id: 'sr2', nombre: 'Pizzería', rubroId: 'r1' },
     { id: 'sr3', nombre: 'Cafetería', rubroId: 'r1' },
     { id: 'sr4', nombre: 'Heladería', rubroId: 'r1' },
     { id: 'sr5', nombre: 'Bar', rubroId: 'r1' },
     { id: 'sr6', nombre: 'Cervecería', rubroId: 'r1' },
-    // Indumentaria
+    { id: 'sr_g1', nombre: 'Comidas Caseras', rubroId: 'r1' },
+    { id: 'sr_g2', nombre: 'Rotisería', rubroId: 'r1' },
+    { id: 'sr_g3', nombre: 'Dulces y Repostería', rubroId: 'r1' },
+    { id: 'sr_g4', nombre: 'Catering para Fiestas', rubroId: 'r1' },
+    
+    // Indumentaria (r2)
     { id: 'sr7', nombre: 'Ropa de Mujer', rubroId: 'r2' },
     { id: 'sr8', nombre: 'Ropa de Hombre', rubroId: 'r2' },
     { id: 'sr9', nombre: 'Ropa de Niños', rubroId: 'r2' },
     { id: 'sr10', nombre: 'Zapatería', rubroId: 'r2' },
     { id: 'sr11', nombre: 'Lencería', rubroId: 'r2' },
-    // Tecnología
+    
+    // Tecnología (r3)
     { id: 'sr12', nombre: 'Venta de Equipos', rubroId: 'r3' },
     { id: 'sr13', nombre: 'Servicio Técnico de PC', rubroId: 'r3' },
     { id: 'sr14', nombre: 'Reparación de Celulares', rubroId: 'r3' },
-    // Servicios
-    { id: 'sr15', nombre: 'Peluquería', rubroId: 'r4' },
-    { id: 'sr16', nombre: 'Taller Mecánico', rubroId: 'r4' },
+    { id: 'sr_t1', nombre: 'Venta de Electrodomésticos', rubroId: 'r3' },
+    { id: 'sr_t2', nombre: 'Electrónica', rubroId: 'r3' },
+
+    // Profesionales y Oficios (r4)
     { id: 'sr17', nombre: 'Plomería', rubroId: 'r4' },
     { id: 'sr18', nombre: 'Electricista', rubroId: 'r4' },
-    { id: 'sr19', nombre: 'Estudio Contable', rubroId: 'r4' },
-    // Turismo
+    { id: 'sr_po1', nombre: 'Abogados', rubroId: 'r4' },
+    { id: 'sr_po2', nombre: 'Arquitectos', rubroId: 'r4' },
+    { id: 'sr_po3', nombre: 'Ingenieros', rubroId: 'r4' },
+    { id: 'sr_po4', nombre: 'Gasista', rubroId: 'r4' },
+    { id: 'sr_po5', nombre: 'Albañil', rubroId: 'r4' },
+    { id: 'sr_po6', nombre: 'Pintor', rubroId: 'r4' },
+    { id: 'sr_po7', nombre: 'Estudio Contable', rubroId: 'r4' },
+    { id: 'sr_po8', nombre: 'Taller Mecánico', rubroId: 'r4' },
+
+    // Turismo (r5)
     { id: 'sr20', nombre: 'Hotel', rubroId: 'r5' },
     { id: 'sr21', nombre: 'Agencia de Viajes', rubroId: 'r5' },
     { id: 'sr22', nombre: 'Alquiler de Cabañas', rubroId: 'r5' },
     { id: 'sr23', nombre: 'Excursiones', rubroId: 'r5' },
+
+    // Hogar y Construcción (r6)
+    { id: 'sr_hc1', nombre: 'Muebles', rubroId: 'r6' },
+    { id: 'sr_hc2', nombre: 'Cocina', rubroId: 'r6' },
+    { id: 'sr_hc3', nombre: 'Jardín', rubroId: 'r6' },
+    { id: 'sr_hc4', nombre: 'Seguridad', rubroId: 'r6' },
+    { id: 'sr_hc5', nombre: 'Iluminación', rubroId: 'r6' },
+    { id: 'sr_hc6', nombre: 'Organización del Hogar', rubroId: 'r6' },
+
+    // Salud (r7)
+    { id: 'sr_s1', nombre: 'Médicos', rubroId: 'r7' },
+    { id: 'sr_s2', nombre: 'Enfermeros', rubroId: 'r7' },
+    { id: 'sr_s3', nombre: 'Kinesiólogos', rubroId: 'r7' },
+    { id: 'sr_s4', nombre: 'Masajistas', rubroId: 'r7' },
+    { id: 'sr_s5', nombre: 'Psicólogos', rubroId: 'r7' },
+    { id: 'sr_s6', nombre: 'Psicopedagogos', rubroId: 'r7' },
+    { id: 'sr_s7', nombre: 'Asistente Terapéutico', rubroId: 'r7' },
+    
+    // Belleza (r8)
+    { id: 'sr_b1', nombre: 'Spa', rubroId: 'r8' },
+    { id: 'sr_b2', nombre: 'Estética', rubroId: 'r8' },
+    { id: 'sr_b3', nombre: 'Depilación', rubroId: 'r8' },
+    { id: 'sr_b4', nombre: 'Uñas', rubroId: 'r8' },
+    { id: 'sr_b5', nombre: 'Peluquería', rubroId: 'r8' },
+    
+    // Vehículos y Propiedades (r9)
+    { id: 'sr_vp1', nombre: 'Venta y Alquiler de Propiedades', rubroId: 'r9' },
+    { id: 'sr_vp2', nombre: 'Venta de Vehículos', rubroId: 'r9' },
   ],
   usuarios: [
     { id: 'u1', nombre: 'Juan Perez', email: 'juan.perez@example.com', password: 'password123', telefono: '1122334455' },
