@@ -1,5 +1,5 @@
 // server.js
-console.log('--- EJECUTANDO SERVIDOR DE API v7 (con Sub-Rubros) ---');
+console.log('--- EJECUTANDO SERVIDOR DE API v8 (con DB Persistente) ---');
 
 const express = require("express");
 const cors = require("cors");
@@ -32,7 +32,7 @@ app.use((req, res, next) => {
 app.get("/api/health", (req, res) => {
   res.status(200).json({
     status: isDbReady ? "ok" : "initializing",
-    message: `Servidor v7 activo. Estado de la DB: ${isDbReady ? 'Lista' : 'Iniciando'}`,
+    message: `Servidor v8 activo. Estado de la DB: ${isDbReady ? 'Lista' : 'Iniciando'}`,
     dbError: dbError ? dbError.message : null,
     timestamp: new Date().toISOString(),
   });
@@ -40,17 +40,19 @@ app.get("/api/health", (req, res) => {
 
 app.get("/api/data", async (req, res) => {
     try {
-        let [provincias, ciudades, rubros, subRubros, usuarios, comercios] = await Promise.all([
+        let [provincias, ciudades, rubros, subRubros, usuarios, comercios, banners, pagos] = await Promise.all([
             dbAll("SELECT * FROM provincias ORDER BY nombre"),
             dbAll("SELECT * FROM ciudades"),
             dbAll("SELECT * FROM rubros ORDER BY nombre"),
             dbAll("SELECT * FROM subrubros ORDER BY nombre"),
             dbAll("SELECT id, nombre, email, telefono FROM usuarios"),
             dbAll("SELECT * FROM comercios"),
+            dbAll("SELECT * FROM banners"),
+            dbAll("SELECT * FROM pagos"),
         ]);
         
         comercios = comercios.map(c => ({...c, galeriaImagenes: c.galeriaImagenes ? JSON.parse(c.galeriaImagenes) : [] }));
-        res.json({ provincias, ciudades, rubros, subRubros, usuarios, comercios, banners: initialData.banners, pagos: initialData.pagos });
+        res.json({ provincias, ciudades, rubros, subRubros, usuarios, comercios, banners, pagos });
     } catch (err) {
         console.error('ERROR EN GET /api/data:', err.stack);
         res.status(500).json({ error: 'Error desconocido en el servidor.' });
@@ -151,7 +153,7 @@ app.post("/api/reset-data", async (req, res) => {
     dbError = null;
     console.log("Iniciando reseteo de la base de datos...");
     try {
-      await setupDatabaseAndData();
+      await setupAndPopulateDatabase();
       isDbReady = true;
       console.log("Reseteo de la base de datos completado.");
       res.status(200).json({ message: "Base de datos reseteada con éxito." });
@@ -166,12 +168,12 @@ app.use((req, res) => {
   console.log(`[404] RUTA NO ENCONTRADA POR EL SERVIDOR: ${req.method} ${req.originalUrl}`);
   res.status(404).json({
     error: `Ruta no encontrada en el servidor: ${req.method} ${req.originalUrl}`,
-    message: "La ruta que estás buscando no existe. (v7)"
+    message: "La ruta que estás buscando no existe. (v8)"
   });
 });
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Servidor v7 escuchando en el puerto ${PORT}. Iniciando conexión con la base de datos en segundo plano...`);
+  console.log(`Servidor v8 escuchando en el puerto ${PORT}. Iniciando conexión con la base de datos en segundo plano...`);
   initializeDatabase();
 });
 
@@ -186,7 +188,18 @@ function initializeDatabase() {
         console.log("Conectado a la base de datos SQLite en", dbPath);
         
         try {
-            await setupDatabaseAndData();
+            // *** LÓGICA DE PERSISTENCIA ***
+            // 1. Revisamos si la base de datos ya tiene las tablas que necesitamos.
+            const tableCheck = await dbGet("SELECT name FROM sqlite_master WHERE type='table' AND name='usuarios'");
+
+            // 2. Si NO existe la tabla 'usuarios', significa que la DB está vacía.
+            if (!tableCheck) {
+                console.log("Base de datos vacía. Ejecutando configuración inicial...");
+                await setupAndPopulateDatabase();
+            } else {
+                // 3. Si la tabla SÍ existe, no hacemos nada y usamos los datos existentes.
+                console.log("Base de datos existente encontrada. Omitiendo configuración inicial.");
+            }
             isDbReady = true;
             console.log("¡ÉXITO! Base de datos lista y servidor completamente operativo.");
         } catch (setupErr) {
@@ -200,10 +213,11 @@ const dbRun = (sql, params = []) => new Promise((resolve, reject) => db.run(sql,
 const dbAll = (sql, params = []) => new Promise((resolve, reject) => db.all(sql, params, (err, rows) => { if (err) reject(err); else resolve(rows); }));
 const dbGet = (sql, params = []) => new Promise((resolve, reject) => db.get(sql, params, (err, row) => { if (err) reject(err); else resolve(row); }));
 
-const setupDatabaseAndData = async () => {
+// Esta función ahora BORRA y RECREA todo. Es llamada solo la primera vez o en un reseteo manual.
+const setupAndPopulateDatabase = async () => {
     try {
         console.log("Limpiando base de datos antigua para actualizar esquema...");
-        const tables = ["provincias", "ciudades", "rubros", "subrubros", "usuarios", "comercios"];
+        const tables = ["provincias", "ciudades", "rubros", "subrubros", "usuarios", "comercios", "banners", "pagos"];
         for (const table of tables) { await dbRun(`DROP TABLE IF EXISTS ${table}`); }
         
         console.log("Esquema limpio. Creando tablas nuevas...");
@@ -213,10 +227,12 @@ const setupDatabaseAndData = async () => {
         await dbRun("CREATE TABLE subrubros (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, rubroId TEXT NOT NULL)");
         await dbRun(`CREATE TABLE usuarios (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, email TEXT UNIQUE, password TEXT NOT NULL, telefono TEXT, isVerified INTEGER DEFAULT 0, verificationCode TEXT)`);
         await dbRun(`CREATE TABLE comercios (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, imagenUrl TEXT, rubroId TEXT, subRubroId TEXT, provinciaId TEXT, provinciaNombre TEXT, ciudadId TEXT, ciudadNombre TEXT, usuarioId TEXT NOT NULL, whatsapp TEXT NOT NULL, direccion TEXT, googleMapsUrl TEXT, websiteUrl TEXT, description TEXT, galeriaImagenes TEXT)`);
+        await dbRun("CREATE TABLE banners (id TEXT PRIMARY KEY, comercioId TEXT NOT NULL, imagenUrl TEXT NOT NULL, venceEl TEXT NOT NULL)");
+        await dbRun("CREATE TABLE pagos (id TEXT PRIMARY KEY, comercioId TEXT NOT NULL, monto REAL NOT NULL, fecha TEXT NOT NULL, mercadoPagoId TEXT NOT NULL)");
         
         console.log("Tablas creadas con éxito. Poblando con datos iniciales...");
         
-        const { provincias, ciudades, rubros, subRubros, usuarios, comercios } = initialData;
+        const { provincias, ciudades, rubros, subRubros, usuarios, comercios, banners, pagos } = initialData;
         for (const p of provincias) await dbRun("INSERT INTO provincias (id, nombre) VALUES (?, ?)", [p.id, p.nombre]);
         for (const c of ciudades) await dbRun("INSERT INTO ciudades (id, nombre, provinciaId) VALUES (?, ?, ?)", [c.id, c.nombre, c.provinciaId]);
         for (const r of rubros) await dbRun("INSERT INTO rubros (id, nombre, icon) VALUES (?, ?, ?)", [r.id, r.nombre, r.icon]);
@@ -233,8 +249,12 @@ const setupDatabaseAndData = async () => {
           await dbRun("INSERT INTO comercios (id, nombre, imagenUrl, rubroId, subRubroId, provinciaId, provinciaNombre, ciudadId, ciudadNombre, usuarioId, whatsapp, direccion, googleMapsUrl, websiteUrl, description, galeriaImagenes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
           [c.id, c.nombre, c.imagenUrl, c.rubroId, c.subRubroId, c.provinciaId, c.provinciaNombre, c.ciudadId, c.ciudadNombre, c.usuarioId, c.whatsapp, c.direccion, c.googleMapsUrl, c.websiteUrl, c.description, galeriaJson]);
         }
+        
+        for (const b of banners) await dbRun("INSERT INTO banners (id, comercioId, imagenUrl, venceEl) VALUES (?, ?, ?, ?)", [b.id, b.comercioId, b.imagenUrl, b.venceEl]);
+        for (const p of pagos) await dbRun("INSERT INTO pagos (id, comercioId, monto, fecha, mercadoPagoId) VALUES (?, ?, ?, ?, ?)", [p.id, p.comercioId, p.monto, p.fecha, p.mercadoPagoId]);
+
     } catch (err) {
-        console.error("Error en setupDatabaseAndData:", err.message);
+        console.error("Error en setupAndPopulateDatabase:", err.message);
         throw err;
     }
 };
