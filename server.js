@@ -219,7 +219,7 @@ const setupDatabaseAndData = async () => {
         const { provincias, ciudades, rubros, subRubros, usuarios, comercios } = initialData;
         for (const p of provincias) await dbRun("INSERT INTO provincias (id, nombre) VALUES (?, ?)", [p.id, p.nombre]);
         for (const c of ciudades) await dbRun("INSERT INTO ciudades (id, nombre, provinciaId) VALUES (?, ?, ?)", [c.id, c.nombre, c.provinciaId]);
-        for (const r of rubros) await dbRun("INSERT INTO rubros (id, nombre, icon) VALUES (?, ?)", [r.id, r.nombre, r.icon]);
+        for (const r of rubros) await dbRun("INSERT INTO rubros (id, nombre, icon) VALUES (?, ?, ?)", [r.id, r.nombre, r.icon]);
         for (const sr of subRubros) await dbRun("INSERT INTO subrubros (id, nombre, rubroId) VALUES (?, ?, ?)", [sr.id, sr.nombre, sr.rubroId]);
         
         for (const u of usuarios) {
