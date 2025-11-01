@@ -1,5 +1,5 @@
 // server.js
-console.log('--- EJECUTANDO SERVIDOR DE API v8 (con DB Persistente) ---');
+console.log('--- EJECUTANDO SERVIDOR DE API v9 (Forzar Reconstrucción DB) ---');
 
 const express = require("express");
 const cors = require("cors");
@@ -32,7 +32,7 @@ app.use((req, res, next) => {
 app.get("/api/health", (req, res) => {
   res.status(200).json({
     status: isDbReady ? "ok" : "initializing",
-    message: `Servidor v8 activo. Estado de la DB: ${isDbReady ? 'Lista' : 'Iniciando'}`,
+    message: `Servidor v9 activo. Estado de la DB: ${isDbReady ? 'Lista' : 'Iniciando'}`,
     dbError: dbError ? dbError.message : null,
     timestamp: new Date().toISOString(),
   });
@@ -55,7 +55,7 @@ app.get("/api/data", async (req, res) => {
         res.json({ provincias, ciudades, rubros, subRubros, usuarios, comercios, banners, pagos });
     } catch (err) {
         console.error('ERROR EN GET /api/data:', err.stack);
-        res.status(500).json({ error: 'Error desconocido en el servidor.' });
+        res.status(500).json({ error: `Error interno del servidor al procesar la petición. Detalles: ${err.message}` });
     }
 });
 
@@ -168,12 +168,12 @@ app.use((req, res) => {
   console.log(`[404] RUTA NO ENCONTRADA POR EL SERVIDOR: ${req.method} ${req.originalUrl}`);
   res.status(404).json({
     error: `Ruta no encontrada en el servidor: ${req.method} ${req.originalUrl}`,
-    message: "La ruta que estás buscando no existe. (v8)"
+    message: "La ruta que estás buscando no existe. (v9)"
   });
 });
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Servidor v8 escuchando en el puerto ${PORT}. Iniciando conexión con la base de datos en segundo plano...`);
+  console.log(`Servidor v9 escuchando en el puerto ${PORT}. Iniciando conexión con la base de datos en segundo plano...`);
   initializeDatabase();
 });
 
@@ -188,20 +188,13 @@ function initializeDatabase() {
         console.log("Conectado a la base de datos SQLite en", dbPath);
         
         try {
-            // *** LÓGICA DE PERSISTENCIA ***
-            // 1. Revisamos si la base de datos ya tiene las tablas que necesitamos.
-            const tableCheck = await dbGet("SELECT name FROM sqlite_master WHERE type='table' AND name='usuarios'");
-
-            // 2. Si NO existe la tabla 'usuarios', significa que la DB está vacía.
-            if (!tableCheck) {
-                console.log("Base de datos vacía. Ejecutando configuración inicial...");
-                await setupAndPopulateDatabase();
-            } else {
-                // 3. Si la tabla SÍ existe, no hacemos nada y usamos los datos existentes.
-                console.log("Base de datos existente encontrada. Omitiendo configuración inicial.");
-            }
+            console.log("--- FORZANDO RECONSTRUCCIÓN COMPLETA DE LA BASE DE DATOS ---");
+            // Llamamos directamente a la función que borra y crea todo, sin condiciones.
+            // Esto limpiará la base de datos vieja y corrupta en el disco de Render.
+            await setupAndPopulateDatabase();
+            
             isDbReady = true;
-            console.log("¡ÉXITO! Base de datos lista y servidor completamente operativo.");
+            console.log("¡ÉXITO! Base de datos reconstruida y servidor completamente operativo.");
         } catch (setupErr) {
             console.error("Error fatal durante el setup de la DB:", setupErr.message, setupErr.stack);
             dbError = setupErr;
@@ -213,7 +206,7 @@ const dbRun = (sql, params = []) => new Promise((resolve, reject) => db.run(sql,
 const dbAll = (sql, params = []) => new Promise((resolve, reject) => db.all(sql, params, (err, rows) => { if (err) reject(err); else resolve(rows); }));
 const dbGet = (sql, params = []) => new Promise((resolve, reject) => db.get(sql, params, (err, row) => { if (err) reject(err); else resolve(row); }));
 
-// Esta función ahora BORRA y RECREA todo. Es llamada solo la primera vez o en un reseteo manual.
+// Esta función ahora BORRA y RECREA todo.
 const setupAndPopulateDatabase = async () => {
     try {
         console.log("Limpiando base de datos antigua para actualizar esquema...");
