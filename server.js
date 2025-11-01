@@ -1,5 +1,5 @@
 // server.js
-console.log('--- EJECUTANDO SERVIDOR DE API v6 (Fallback de Contraseña) ---');
+console.log('--- EJECUTANDO SERVIDOR DE API v7 (con Sub-Rubros) ---');
 
 const express = require("express");
 const cors = require("cors");
@@ -32,7 +32,7 @@ app.use((req, res, next) => {
 app.get("/api/health", (req, res) => {
   res.status(200).json({
     status: isDbReady ? "ok" : "initializing",
-    message: `Servidor v6 activo. Estado de la DB: ${isDbReady ? 'Lista' : 'Iniciando'}`,
+    message: `Servidor v7 activo. Estado de la DB: ${isDbReady ? 'Lista' : 'Iniciando'}`,
     dbError: dbError ? dbError.message : null,
     timestamp: new Date().toISOString(),
   });
@@ -40,16 +40,17 @@ app.get("/api/health", (req, res) => {
 
 app.get("/api/data", async (req, res) => {
     try {
-        let [provincias, ciudades, rubros, usuarios, comercios] = await Promise.all([
+        let [provincias, ciudades, rubros, subRubros, usuarios, comercios] = await Promise.all([
             dbAll("SELECT * FROM provincias ORDER BY nombre"),
             dbAll("SELECT * FROM ciudades"),
             dbAll("SELECT * FROM rubros ORDER BY nombre"),
+            dbAll("SELECT * FROM subrubros ORDER BY nombre"),
             dbAll("SELECT id, nombre, email, telefono FROM usuarios"),
             dbAll("SELECT * FROM comercios"),
         ]);
         
         comercios = comercios.map(c => ({...c, galeriaImagenes: c.galeriaImagenes ? JSON.parse(c.galeriaImagenes) : [] }));
-        res.json({ provincias, ciudades, rubros, usuarios, comercios, banners: initialData.banners, pagos: initialData.pagos });
+        res.json({ provincias, ciudades, rubros, subRubros, usuarios, comercios, banners: initialData.banners, pagos: initialData.pagos });
     } catch (err) {
         console.error('ERROR EN GET /api/data:', err.stack);
         res.status(500).json({ error: 'Error desconocido en el servidor.' });
@@ -114,12 +115,12 @@ app.post("/api/comercios", async (req, res) => {
     const newId = generateId();
     const galeria = JSON.stringify(Array.isArray(data.galeriaImagenes) ? data.galeriaImagenes : []);
     const params = [
-        newId, data.nombre || '', data.imagenUrl || '', data.rubroId || '', data.provinciaId || '',
+        newId, data.nombre || '', data.imagenUrl || '', data.rubroId || '', data.subRubroId || '', data.provinciaId || '',
         data.provinciaNombre || '', data.ciudadId || '', data.ciudadNombre || '', data.usuarioId,
         data.whatsapp || '', data.direccion || null, data.googleMapsUrl || null, data.websiteUrl || null,
         data.description || null, galeria
     ];
-    await dbRun("INSERT INTO comercios (id, nombre, imagenUrl, rubroId, provinciaId, provinciaNombre, ciudadId, ciudadNombre, usuarioId, whatsapp, direccion, googleMapsUrl, websiteUrl, description, galeriaImagenes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", params);
+    await dbRun("INSERT INTO comercios (id, nombre, imagenUrl, rubroId, subRubroId, provinciaId, provinciaNombre, ciudadId, ciudadNombre, usuarioId, whatsapp, direccion, googleMapsUrl, websiteUrl, description, galeriaImagenes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", params);
     const createdComercio = await dbGet("SELECT * FROM comercios WHERE id = ?", [newId]);
     res.status(201).json({ ...createdComercio, galeriaImagenes: JSON.parse(createdComercio.galeriaImagenes || '[]') });
 });
@@ -129,12 +130,12 @@ app.put("/api/comercios/:id", async (req, res) => {
     const data = req.body;
     const galeria = JSON.stringify(Array.isArray(data.galeriaImagenes) ? data.galeriaImagenes : []);
     const params = [
-        data.nombre || '', data.imagenUrl || '', data.rubroId || '', data.provinciaId || '', 
+        data.nombre || '', data.imagenUrl || '', data.rubroId || '', data.subRubroId || '', data.provinciaId || '', 
         data.provinciaNombre || '', data.ciudadId || '', data.ciudadNombre || '',
         data.whatsapp || '', data.direccion || null, data.googleMapsUrl || null, 
         data.websiteUrl || null, data.description || null, galeria, id
     ];
-    await dbRun(`UPDATE comercios SET nombre = ?, imagenUrl = ?, rubroId = ?, provinciaId = ?, provinciaNombre = ?, ciudadId = ?, ciudadNombre = ?, whatsapp = ?, direccion = ?, googleMapsUrl = ?, websiteUrl = ?, description = ?, galeriaImagenes = ? WHERE id = ?`, params);
+    await dbRun(`UPDATE comercios SET nombre = ?, imagenUrl = ?, rubroId = ?, subRubroId = ?, provinciaId = ?, provinciaNombre = ?, ciudadId = ?, ciudadNombre = ?, whatsapp = ?, direccion = ?, googleMapsUrl = ?, websiteUrl = ?, description = ?, galeriaImagenes = ? WHERE id = ?`, params);
     const updatedComercio = await dbGet("SELECT * FROM comercios WHERE id = ?", [id]);
     res.status(200).json({ ...updatedComercio, galeriaImagenes: JSON.parse(updatedComercio.galeriaImagenes || '[]') });
 });
@@ -165,12 +166,12 @@ app.use((req, res) => {
   console.log(`[404] RUTA NO ENCONTRADA POR EL SERVIDOR: ${req.method} ${req.originalUrl}`);
   res.status(404).json({
     error: `Ruta no encontrada en el servidor: ${req.method} ${req.originalUrl}`,
-    message: "La ruta que estás buscando no existe. (v6)"
+    message: "La ruta que estás buscando no existe. (v7)"
   });
 });
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Servidor v6 escuchando en el puerto ${PORT}. Iniciando conexión con la base de datos en segundo plano...`);
+  console.log(`Servidor v7 escuchando en el puerto ${PORT}. Iniciando conexión con la base de datos en segundo plano...`);
   initializeDatabase();
 });
 
@@ -202,25 +203,26 @@ const dbGet = (sql, params = []) => new Promise((resolve, reject) => db.get(sql,
 const setupDatabaseAndData = async () => {
     try {
         console.log("Limpiando base de datos antigua para actualizar esquema...");
-        const tables = ["provincias", "ciudades", "rubros", "usuarios", "comercios"];
+        const tables = ["provincias", "ciudades", "rubros", "subrubros", "usuarios", "comercios"];
         for (const table of tables) { await dbRun(`DROP TABLE IF EXISTS ${table}`); }
         
         console.log("Esquema limpio. Creando tablas nuevas...");
         await dbRun("CREATE TABLE provincias (id TEXT PRIMARY KEY, nombre TEXT NOT NULL)");
         await dbRun("CREATE TABLE ciudades (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, provinciaId TEXT NOT NULL)");
         await dbRun("CREATE TABLE rubros (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, icon TEXT)");
+        await dbRun("CREATE TABLE subrubros (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, rubroId TEXT NOT NULL)");
         await dbRun(`CREATE TABLE usuarios (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, email TEXT UNIQUE, password TEXT NOT NULL, telefono TEXT, isVerified INTEGER DEFAULT 0, verificationCode TEXT)`);
-        await dbRun(`CREATE TABLE comercios (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, imagenUrl TEXT, rubroId TEXT, provinciaId TEXT, provinciaNombre TEXT, ciudadId TEXT, ciudadNombre TEXT, usuarioId TEXT NOT NULL, whatsapp TEXT NOT NULL, direccion TEXT, googleMapsUrl TEXT, websiteUrl TEXT, description TEXT, galeriaImagenes TEXT)`);
+        await dbRun(`CREATE TABLE comercios (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, imagenUrl TEXT, rubroId TEXT, subRubroId TEXT, provinciaId TEXT, provinciaNombre TEXT, ciudadId TEXT, ciudadNombre TEXT, usuarioId TEXT NOT NULL, whatsapp TEXT NOT NULL, direccion TEXT, googleMapsUrl TEXT, websiteUrl TEXT, description TEXT, galeriaImagenes TEXT)`);
         
         console.log("Tablas creadas con éxito. Poblando con datos iniciales...");
         
-        const { provincias, ciudades, rubros, usuarios, comercios } = initialData;
+        const { provincias, ciudades, rubros, subRubros, usuarios, comercios } = initialData;
         for (const p of provincias) await dbRun("INSERT INTO provincias (id, nombre) VALUES (?, ?)", [p.id, p.nombre]);
         for (const c of ciudades) await dbRun("INSERT INTO ciudades (id, nombre, provinciaId) VALUES (?, ?, ?)", [c.id, c.nombre, c.provinciaId]);
-        for (const r of rubros) await dbRun("INSERT INTO rubros (id, nombre, icon) VALUES (?, ?, ?)", [r.id, r.nombre, r.icon]);
+        for (const r of rubros) await dbRun("INSERT INTO rubros (id, nombre, icon) VALUES (?, ?)", [r.id, r.nombre, r.icon]);
+        for (const sr of subRubros) await dbRun("INSERT INTO subrubros (id, nombre, rubroId) VALUES (?, ?, ?)", [sr.id, sr.nombre, sr.rubroId]);
         
         for (const u of usuarios) {
-            // SOLUCIÓN: Si la contraseña no viene en los datos de prueba, se asigna una por defecto.
             const password = u.password || 'password123';
             await dbRun("INSERT INTO usuarios (id, nombre, email, password, telefono, isVerified) VALUES (?, ?, ?, ?, ?, 1)", 
             [u.id, u.nombre, u.email, password, u.telefono || null]);
@@ -228,8 +230,8 @@ const setupDatabaseAndData = async () => {
 
         for (const c of comercios) {
           const galeriaJson = c.galeriaImagenes ? JSON.stringify(c.galeriaImagenes) : '[]';
-          await dbRun("INSERT INTO comercios (id, nombre, imagenUrl, rubroId, provinciaId, provinciaNombre, ciudadId, ciudadNombre, usuarioId, whatsapp, direccion, googleMapsUrl, websiteUrl, description, galeriaImagenes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
-          [c.id, c.nombre, c.imagenUrl, c.rubroId, c.provinciaId, c.provinciaNombre, c.ciudadId, c.ciudadNombre, c.usuarioId, c.whatsapp, c.direccion, c.googleMapsUrl, c.websiteUrl, c.description, galeriaJson]);
+          await dbRun("INSERT INTO comercios (id, nombre, imagenUrl, rubroId, subRubroId, provinciaId, provinciaNombre, ciudadId, ciudadNombre, usuarioId, whatsapp, direccion, googleMapsUrl, websiteUrl, description, galeriaImagenes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+          [c.id, c.nombre, c.imagenUrl, c.rubroId, c.subRubroId, c.provinciaId, c.provinciaNombre, c.ciudadId, c.ciudadNombre, c.usuarioId, c.whatsapp, c.direccion, c.googleMapsUrl, c.websiteUrl, c.description, galeriaJson]);
         }
     } catch (err) {
         console.error("Error en setupDatabaseAndData:", err.message);
