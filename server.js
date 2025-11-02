@@ -1,278 +1,189 @@
 // server.js
-console.log('--- EJECUTANDO SERVIDOR DE API v11 (con Barrio) ---');
-
-const express = require("express");
-const cors = require("cors");
-const sqlite3 = require("sqlite3").verbose();
-const path = require("path");
+const express = require('express');
+const cors = require('cors');
+const { v4: uuidv4 } = require('uuid');
 const { initialData } = require('./mockData.js');
 
 const app = express();
-const PORT = process.env.PORT || 10000;
+// Usamos el puerto que nos asigne el proveedor de hosting (como Render), o 3001 para desarrollo local.
+const PORT = process.env.PORT || 3001;
 
-let isDbReady = false;
-let dbError = null;
-let db;
+// --- Middleware ---
+app.use(cors()); // Habilita CORS para que el frontend pueda hacer peticiones.
+// Aumentamos el límite del payload para poder recibir imágenes en base64.
+app.use(express.json({ limit: '10mb' })); 
 
-app.use(cors({ origin: "*" }));
-app.use(express.json({ limit: "10mb" }));
+// --- "Base de datos" en memoria ---
+// Hacemos una copia profunda de los datos iniciales para poder modificarlos y resetearlos.
+let db = JSON.parse(JSON.stringify(initialData));
 
-app.use((req, res, next) => {
-  console.log(`[PETICIÓN] ${req.method} ${req.originalUrl}`);
-  next();
+// --- Endpoints de la API ---
+
+// [GET] /api/data - Devuelve todos los datos de la "base de datos"
+app.get('/api/data', (req, res) => {
+    res.json(db);
 });
 
-// Middleware para verificar si la DB está lista
-app.use((req, res, next) => {
-  if (req.path === '/api/health') return next();
-  if (dbError) return res.status(503).json({ error: "Error crítico en la base de datos.", details: dbError.message });
-  if (!isDbReady) return res.status(503).json({ error: "El servidor se está iniciando, la base de datos aún no está lista. Intente de nuevo en un momento." });
-  next();
+// [POST] /api/reset-data - Restaura los datos al estado inicial
+app.post('/api/reset-data', (req, res) => {
+    console.log("Restaurando datos iniciales...");
+    db = JSON.parse(JSON.stringify(initialData)); // Volvemos a copiar los datos originales
+    res.status(200).json({ message: 'Datos restaurados con éxito.' });
 });
 
-app.get("/api/health", (req, res) => {
-  res.status(200).json({
-    status: isDbReady ? "ok" : "initializing",
-    message: `Servidor v11 activo. Estado de la DB: ${isDbReady ? 'Lista' : 'Iniciando'}`,
-    dbError: dbError ? dbError.message : null,
-    timestamp: new Date().toISOString(),
-  });
-});
-
-app.get("/api/data", async (req, res) => {
-    try {
-        let [provincias, ciudades, rubros, subRubros, usuarios, comercios, banners, pagos] = await Promise.all([
-            dbAll("SELECT * FROM provincias ORDER BY nombre"),
-            dbAll("SELECT * FROM ciudades"),
-            dbAll("SELECT * FROM rubros ORDER BY nombre"),
-            dbAll("SELECT * FROM subrubros ORDER BY nombre"),
-            dbAll("SELECT id, nombre, email, telefono FROM usuarios"),
-            dbAll("SELECT * FROM comercios"),
-            dbAll("SELECT * FROM banners"),
-            dbAll("SELECT * FROM pagos"),
-        ]);
-        
-        comercios = comercios.map(c => ({...c, galeriaImagenes: c.galeriaImagenes ? JSON.parse(c.galeriaImagenes) : [] }));
-        res.json({ provincias, ciudades, rubros, subRubros, usuarios, comercios, banners, pagos });
-    } catch (err) {
-        console.error('ERROR EN GET /api/data:', err.stack);
-        res.status(500).json({ error: `Error interno del servidor al procesar la petición. Detalles: ${err.message}` });
-    }
-});
-
-app.post("/api/register", async (req, res) => {
+// [POST] /api/register - Registra un nuevo usuario
+app.post('/api/register', (req, res) => {
     const { nombre, email, password, telefono } = req.body;
-    if (!nombre || !email || !password) return res.status(400).json({ error: "Nombre, email y contraseña son requeridos." });
-    
-    const existingUser = await dbGet("SELECT * FROM usuarios WHERE email = ?", [email]);
-    if (existingUser) return res.status(409).json({ error: "El email ya está registrado." });
+    if (!nombre || !email || !password) {
+        return res.status(400).json({ error: 'Nombre, email y contraseña son obligatorios.' });
+    }
+    if (db.usuarios.some(u => u.email === email)) {
+        return res.status(409).json({ error: 'El email ya está registrado.' });
+    }
 
-    const newUserId = generateId();
-    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-    console.log(`--- CÓDIGO DE VERIFICACIÓN PARA ${email}: ${verificationCode} ---`);
+    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString(); // Código de 6 dígitos
     
-    await dbRun("INSERT INTO usuarios (id, nombre, email, password, telefono, verificationCode) VALUES (?, ?, ?, ?, ?, ?)", 
-        [newUserId, nombre, email, password, telefono || null, verificationCode]);
+    const newUser = {
+        id: uuidv4(),
+        nombre,
+        email,
+        password, // IMPORTANTE: En una app real, la contraseña debe ser "hasheada" (ej: con bcrypt)
+        telefono: telefono || null,
+        isVerified: false,
+        verificationCode,
+    };
+    db.usuarios.push(newUser);
     
-    res.status(201).json({ message: 'Registro exitoso. Se requiere verificación.', email: email, verificationCode: verificationCode });
+    console.log(`Usuario registrado: ${email}, Código: ${verificationCode}`);
+
+    // En la demo, no se envía un email real. Devolvemos el código para simular el proceso.
+    res.status(201).json({
+        message: 'Registro exitoso. Por favor, verifica tu cuenta.',
+        email: newUser.email,
+        verificationCode: newUser.verificationCode,
+    });
 });
 
-app.post("/api/verify", async (req, res) => {
+// [POST] /api/verify - Verifica la cuenta de un usuario con el código
+app.post('/api/verify', (req, res) => {
     const { email, code } = req.body;
-    if (!email || !code) return res.status(400).json({ error: "Email y código son requeridos." });
+    const user = db.usuarios.find(u => u.email === email);
 
-    const user = await dbGet("SELECT * FROM usuarios WHERE email = ?", [email]);
-    if (!user) return res.status(404).json({ error: "Usuario no encontrado." });
-    if (user.isVerified) return res.status(400).json({ error: "Esta cuenta ya ha sido verificada." });
-    if (user.verificationCode !== code) return res.status(400).json({ error: "El código de verificación es incorrecto." });
-
-    await dbRun("UPDATE usuarios SET isVerified = 1, verificationCode = NULL WHERE id = ?", [user.id]);
-    const { password: _, ...verifiedUser } = user;
-    res.status(200).json({ ...verifiedUser, isVerified: true });
+    if (!user) {
+        return res.status(404).json({ error: 'Usuario no encontrado.' });
+    }
+    if (user.isVerified) {
+        return res.status(400).json({ error: 'El usuario ya está verificado.' });
+    }
+    if (user.verificationCode !== code) {
+        return res.status(400).json({ error: 'Código de verificación incorrecto.' });
+    }
+    
+    user.isVerified = true;
+    delete user.verificationCode; // Limpiamos el código una vez usado
+    
+    // Devolvemos los datos del usuario sin la contraseña
+    const { password, ...userWithoutPassword } = user;
+    res.status(200).json(userWithoutPassword);
 });
 
-app.post("/api/login", async (req, res) => {
-    const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ error: "Email y contraseña son requeridos." });
-    
-    const user = await dbGet("SELECT * FROM usuarios WHERE email = ?", [email]);
-    if (!user || user.password !== password) return res.status(401).json({ error: "Credenciales inválidas." });
-    if (!user.isVerified) return res.status(403).json({ error: "Tu cuenta no ha sido verificada." });
 
-    const { password: _, verificationCode: __, ...userToReturn } = user;
+// [POST] /api/login - Inicia sesión de un usuario
+app.post('/api/login', (req, res) => {
+    const { email, password: inputPassword } = req.body;
+    const user = db.usuarios.find(u => u.email === email);
+
+    if (!user) {
+        return res.status(404).json({ error: 'Email o contraseña incorrectos.' });
+    }
+    if (!user.isVerified) {
+        return res.status(403).json({ error: 'Tu cuenta no ha sido verificada. Por favor, revisá tu email.' });
+    }
+    // IMPORTANTE: En una app real, se comparan contraseñas "hasheadas"
+    if (user.password !== inputPassword) { 
+        return res.status(401).json({ error: 'Email o contraseña incorrectos.' });
+    }
+    
+    // Devolvemos el usuario sin la contraseña
+    const { password, ...userToReturn } = user;
     res.status(200).json(userToReturn);
 });
 
-app.put("/api/usuarios/:id", async (req, res) => {
+// [PUT] /api/usuarios/:id - Actualiza los datos de un usuario
+app.put('/api/usuarios/:id', (req, res) => {
     const { id } = req.params;
     const { nombre, telefono } = req.body;
-    if (!nombre) return res.status(400).json({ error: "El nombre es requerido." });
+    const userIndex = db.usuarios.findIndex(u => u.id === id);
 
-    await dbRun("UPDATE usuarios SET nombre = ?, telefono = ? WHERE id = ?", [nombre, telefono || null, id]);
-    const updatedUser = await dbGet("SELECT id, nombre, email, telefono FROM usuarios WHERE id = ?", [id]);
-    res.status(200).json(updatedUser);
-});
-
-app.post("/api/comercios", async (req, res) => {
-    const data = req.body;
-    const newId = generateId();
-    const galeria = JSON.stringify(Array.isArray(data.galeriaImagenes) ? data.galeriaImagenes : []);
-    const params = [
-        newId, data.nombre || '', data.imagenUrl || '', data.rubroId || '', data.subRubroId || '', data.provinciaId || '',
-        data.provinciaNombre || '', data.ciudadId || '', data.ciudadNombre || '', data.barrio || null, data.usuarioId,
-        data.whatsapp || '', data.direccion || null, data.googleMapsUrl || null, data.websiteUrl || null,
-        data.description || null, galeria
-    ];
-    await dbRun("INSERT INTO comercios (id, nombre, imagenUrl, rubroId, subRubroId, provinciaId, provinciaNombre, ciudadId, ciudadNombre, barrio, usuarioId, whatsapp, direccion, googleMapsUrl, websiteUrl, description, galeriaImagenes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", params);
-    const createdComercio = await dbGet("SELECT * FROM comercios WHERE id = ?", [newId]);
-    res.status(201).json({ ...createdComercio, galeriaImagenes: JSON.parse(createdComercio.galeriaImagenes || '[]') });
-});
-
-app.put("/api/comercios/:id", async (req, res) => {
-    const { id } = req.params;
-    const data = req.body;
-    const galeria = JSON.stringify(Array.isArray(data.galeriaImagenes) ? data.galeriaImagenes : []);
-    const params = [
-        data.nombre || '', data.imagenUrl || '', data.rubroId || '', data.subRubroId || '', data.provinciaId || '', 
-        data.provinciaNombre || '', data.ciudadId || '', data.ciudadNombre || '', data.barrio || null,
-        data.whatsapp || '', data.direccion || null, data.googleMapsUrl || null, 
-        data.websiteUrl || null, data.description || null, galeria, id
-    ];
-    await dbRun(`UPDATE comercios SET nombre = ?, imagenUrl = ?, rubroId = ?, subRubroId = ?, provinciaId = ?, provinciaNombre = ?, ciudadId = ?, ciudadNombre = ?, barrio = ?, whatsapp = ?, direccion = ?, googleMapsUrl = ?, websiteUrl = ?, description = ?, galeriaImagenes = ? WHERE id = ?`, params);
-    const updatedComercio = await dbGet("SELECT * FROM comercios WHERE id = ?", [id]);
-    res.status(200).json({ ...updatedComercio, galeriaImagenes: JSON.parse(updatedComercio.galeriaImagenes || '[]') });
-});
-
-app.delete("/api/comercios/:id", async (req, res) => {
-    const { id } = req.params;
-    await dbRun("DELETE FROM comercios WHERE id = ?", [id]);
-    res.status(200).json({ message: "Comercio eliminado con éxito." });
-});
-
-app.post("/api/reset-data", async (req, res) => {
-    isDbReady = false;
-    dbError = null;
-    console.log("Iniciando reseteo de la base de datos...");
-    try {
-      await setupAndPopulateDatabase(true); // Forzar la reconstrucción
-      isDbReady = true;
-      console.log("Reseteo de la base de datos completado.");
-      res.status(200).json({ message: "Base de datos reseteada con éxito." });
-    } catch(err) {
-      dbError = err;
-      console.error("Fallo el reseteo de la base de datos:", err.message);
-      res.status(500).json({ error: "No se pudo resetear la base de datos." });
+    if (userIndex === -1) {
+        return res.status(404).json({ error: 'Usuario no encontrado.' });
     }
+
+    const updatedUser = {
+        ...db.usuarios[userIndex],
+        nombre: nombre || db.usuarios[userIndex].nombre,
+        telefono: telefono !== undefined ? telefono : db.usuarios[userIndex].telefono,
+    };
+    db.usuarios[userIndex] = updatedUser;
+    
+    const { password, ...userToReturn } = updatedUser;
+    res.status(200).json(userToReturn);
 });
 
-// Middleware 404
-app.use((req, res) => {
-  console.log(`[404] RUTA NO ENCONTRADA POR EL SERVIDOR: ${req.method} ${req.originalUrl}`);
-  res.status(404).json({
-    error: `Ruta no encontrada en el servidor: ${req.method} ${req.originalUrl}`,
-    message: "La ruta que estás buscando no existe. (v11)"
-  });
-});
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Servidor v11 escuchando en el puerto ${PORT}. Iniciando conexión con la base de datos...`);
-  initializeDatabase();
-});
-
-// --- LÓGICA DE BASE DE DATOS ---
-// FORZAR RECONSTRUCCIÓN EN EL PRÓXIMO DEPLOY
-const FORCE_REBUILD = true; 
-
-function initializeDatabase() {
-    const dbPath = path.resolve(__dirname, "guia_comercial.db");
-    db = new sqlite3.Database(dbPath, async (err) => {
-        if (err) {
-            console.error("Error fatal al conectar con la DB:", err.message);
-            dbError = err;
-            return;
-        }
-        console.log("Conectado a la base de datos SQLite en", dbPath);
-        
-        try {
-            if (FORCE_REBUILD) {
-                 console.log("Forzando reconstrucción completa de la base de datos...");
-                 await setupAndPopulateDatabase(true);
-            } else {
-                const tableCheck = await dbGet("SELECT name FROM sqlite_master WHERE type='table' AND name='subrubros'");
-                if (tableCheck) {
-                    console.log("La base de datos ya existe y está actualizada. Saltando creación.");
-                } else {
-                    console.log("Base de datos desactualizada. Creando esquema completo...");
-                    await setupAndPopulateDatabase(true);
-                }
-            }
-            isDbReady = true;
-            console.log("Servidor conectado y listo para recibir peticiones.");
-
-        } catch (setupErr) {
-            console.error("Error fatal durante el setup de la DB:", setupErr.message, setupErr.stack);
-            dbError = setupErr;
-        }
-    });
-}
-
-const dbRun = (sql, params = []) => new Promise((resolve, reject) => db.run(sql, params, function (err) { if (err) reject(err); else resolve({ lastID: this.lastID, changes: this.changes }); }));
-const dbAll = (sql, params = []) => new Promise((resolve, reject) => db.all(sql, params, (err, rows) => { if (err) reject(err); else resolve(rows); }));
-const dbGet = (sql, params = []) => new Promise((resolve, reject) => db.get(sql, params, (err, row) => { if (err) reject(err); else resolve(row); }));
-
-const setupAndPopulateDatabase = async (force = false) => {
-    try {
-        if(force) {
-          console.log("Limpiando base de datos antigua para actualizar esquema...");
-          const tables = ["provincias", "ciudades", "rubros", "subrubros", "usuarios", "comercios", "banners", "pagos"];
-          for (const table of tables) { await dbRun(`DROP TABLE IF EXISTS ${table}`); }
-        }
-        
-        console.log("Creando tablas nuevas...");
-        await dbRun("CREATE TABLE IF NOT EXISTS provincias (id TEXT PRIMARY KEY, nombre TEXT NOT NULL)");
-        await dbRun("CREATE TABLE IF NOT EXISTS ciudades (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, provinciaId TEXT NOT NULL)");
-        await dbRun("CREATE TABLE IF NOT EXISTS rubros (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, icon TEXT)");
-        await dbRun("CREATE TABLE IF NOT EXISTS subrubros (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, rubroId TEXT NOT NULL)");
-        await dbRun(`CREATE TABLE IF NOT EXISTS usuarios (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, email TEXT UNIQUE, password TEXT NOT NULL, telefono TEXT, isVerified INTEGER DEFAULT 0, verificationCode TEXT)`);
-        await dbRun(`CREATE TABLE IF NOT EXISTS comercios (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, imagenUrl TEXT, rubroId TEXT, subRubroId TEXT, provinciaId TEXT, provinciaNombre TEXT, ciudadId TEXT, ciudadNombre TEXT, barrio TEXT, usuarioId TEXT NOT NULL, whatsapp TEXT NOT NULL, direccion TEXT, googleMapsUrl TEXT, websiteUrl TEXT, description TEXT, galeriaImagenes TEXT)`);
-        await dbRun("CREATE TABLE IF NOT EXISTS banners (id TEXT PRIMARY KEY, comercioId TEXT NOT NULL, imagenUrl TEXT NOT NULL, venceEl TEXT NOT NULL)");
-        await dbRun("CREATE TABLE IF NOT EXISTS pagos (id TEXT PRIMARY KEY, comercioId TEXT NOT NULL, monto REAL NOT NULL, fecha TEXT NOT NULL, mercadoPagoId TEXT NOT NULL)");
-        
-        console.log("Tablas creadas con éxito. Poblando con datos iniciales...");
-        
-        const { provincias, ciudades, rubros, subRubros, usuarios, comercios, banners, pagos } = initialData;
-        for (const p of provincias) await dbRun("INSERT OR IGNORE INTO provincias (id, nombre) VALUES (?, ?)", [p.id, p.nombre]);
-        for (const c of ciudades) await dbRun("INSERT OR IGNORE INTO ciudades (id, nombre, provinciaId) VALUES (?, ?, ?)", [c.id, c.nombre, c.provinciaId]);
-        for (const r of rubros) await dbRun("INSERT OR IGNORE INTO rubros (id, nombre, icon) VALUES (?, ?, ?)", [r.id, r.nombre, r.icon]);
-        for (const sr of subRubros) await dbRun("INSERT OR IGNORE INTO subrubros (id, nombre, rubroId) VALUES (?, ?, ?)", [sr.id, sr.nombre, sr.rubroId]);
-        
-        for (const u of usuarios) {
-            const existingUser = await dbGet("SELECT id FROM usuarios WHERE id = ?", [u.id]);
-            if (!existingUser) {
-              const password = u.password || 'password123';
-              await dbRun("INSERT INTO usuarios (id, nombre, email, password, telefono, isVerified) VALUES (?, ?, ?, ?, ?, 1)", 
-              [u.id, u.nombre, u.email, password, u.telefono || null]);
-            }
-        }
-
-        for (const c of comercios) {
-           const existingComercio = await dbGet("SELECT id FROM comercios WHERE id = ?", [c.id]);
-           if (!existingComercio) {
-              const galeriaJson = c.galeriaImagenes ? JSON.stringify(c.galeriaImagenes) : '[]';
-              await dbRun("INSERT INTO comercios (id, nombre, imagenUrl, rubroId, subRubroId, provinciaId, provinciaNombre, ciudadId, ciudadNombre, barrio, usuarioId, whatsapp, direccion, googleMapsUrl, websiteUrl, description, galeriaImagenes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
-              [c.id, c.nombre, c.imagenUrl, c.rubroId, c.subRubroId, c.provinciaId, c.provinciaNombre, c.ciudadId, c.ciudadNombre, c.barrio || null, c.usuarioId, c.whatsapp, c.direccion, c.googleMapsUrl, c.websiteUrl, c.description, galeriaJson]);
-           }
-        }
-        
-        for (const b of banners) await dbRun("INSERT OR IGNORE INTO banners (id, comercioId, imagenUrl, venceEl) VALUES (?, ?, ?, ?)", [b.id, b.comercioId, b.imageUrl, b.venceEl]);
-        for (const p of pagos) await dbRun("INSERT OR IGNORE INTO pagos (id, comercioId, monto, fecha, mercadoPagoId) VALUES (?, ?, ?, ?, ?)", [p.id, p.comercioId, p.monto, p.fecha, p.mercadoPagoId]);
-
-    } catch (err) {
-        console.error("Error en setupAndPopulateDatabase:", err.message);
-        throw err;
+// [POST] /api/comercios - Crea un nuevo comercio
+app.post('/api/comercios', (req, res) => {
+    const newComercioData = req.body;
+    if (!newComercioData.nombre || !newComercioData.usuarioId) {
+        return res.status(400).json({ error: 'Faltan datos obligatorios para crear el comercio.' });
     }
-};
+    const newComercio = {
+        id: `co-${uuidv4()}`, // Generamos un ID único
+        ...newComercioData,
+        // Por defecto, un comercio nuevo es de publicidad nivel 1 (gratis)
+        publicidad: newComercioData.publicidad || 1, 
+    };
+    db.comercios.push(newComercio);
+    res.status(201).json(newComercio);
+});
 
-function generateId() {
-    return Math.random().toString(36).substring(2, 9);
-}
+// [PUT] /api/comercios/:id - Actualiza un comercio existente
+app.put('/api/comercios/:id', (req, res) => {
+    const { id } = req.params;
+    const updatedData = req.body;
+    const comercioIndex = db.comercios.findIndex(c => c.id === id);
+
+    if (comercioIndex === -1) {
+        return res.status(404).json({ error: 'Comercio no encontrado.' });
+    }
+
+    // Fusionamos los datos antiguos con los nuevos
+    db.comercios[comercioIndex] = {
+        ...db.comercios[comercioIndex],
+        ...updatedData
+    };
+    
+    res.status(200).json(db.comercios[comercioIndex]);
+});
+
+// [DELETE] /api/comercios/:id - Elimina un comercio
+app.delete('/api/comercios/:id', (req, res) => {
+    const { id } = req.params;
+    const initialLength = db.comercios.length;
+    db.comercios = db.comercios.filter(c => c.id !== id);
+    
+    if (db.comercios.length === initialLength) {
+        return res.status(404).json({ error: 'Comercio no encontrado para eliminar.' });
+    }
+    
+    // Eliminamos también los banners y pagos asociados
+    db.banners = db.banners.filter(b => b.comercioId !== id);
+    db.pagos = db.pagos.filter(p => p.comercioId !== id);
+
+    res.status(200).json({ message: 'Comercio eliminado con éxito.' });
+});
+
+// --- Iniciar Servidor ---
+app.listen(PORT, () => {
+    console.log(`Servidor de GuíaComercial escuchando en http://localhost:${PORT}`);
+});
