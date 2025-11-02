@@ -17,6 +17,16 @@ app.use(express.json({ limit: '10mb' }));
 // Hacemos una copia profunda de los datos iniciales para poder modificarlos y resetearlos.
 let db = JSON.parse(JSON.stringify(initialData));
 
+// --- Mapa de precios de prueba (debe coincidir con el frontend) ---
+const AD_PRICES = {
+    1: 0,
+    2: 1500,
+    3: 3000,
+    4: 5000,
+    5: 8000,
+    6: 12000,
+};
+
 // --- Endpoints de la API ---
 
 // [GET] /api/data - Devuelve todos los datos de la "base de datos"
@@ -165,6 +175,42 @@ app.put('/api/comercios/:id', (req, res) => {
     
     res.status(200).json(db.comercios[comercioIndex]);
 });
+
+// [POST] /api/comercios/:id/upgrade - Simula el pago y la mejora de un plan
+app.post('/api/comercios/:id/upgrade', (req, res) => {
+    const { id } = req.params;
+    const { newLevel } = req.body;
+    const comercioIndex = db.comercios.findIndex(c => c.id === id);
+
+    if (comercioIndex === -1) {
+        return res.status(404).json({ error: 'Comercio no encontrado.' });
+    }
+    if (!newLevel || !AD_PRICES.hasOwnProperty(newLevel)) {
+        return res.status(400).json({ error: 'Nivel de publicidad inválido.' });
+    }
+
+    // 1. Actualizar el nivel del comercio
+    db.comercios[comercioIndex].publicidad = newLevel;
+
+    // 2. Crear un registro de pago simulado
+    const newPago = {
+        id: `pay-${uuidv4()}`,
+        comercioId: id,
+        monto: AD_PRICES[newLevel],
+        fecha: new Date().toISOString(),
+        mercadoPagoId: `mp-test-${Date.now()}`,
+    };
+    db.pagos.push(newPago);
+
+    console.log(`Comercio ${id} mejorado a nivel ${newLevel}. Pago simulado: ${newPago.id}`);
+
+    // 3. Devolver el comercio actualizado y el nuevo pago
+    res.status(200).json({
+        updatedComercio: db.comercios[comercioIndex],
+        newPago,
+    });
+});
+
 
 // [DELETE] /api/comercios/:id - Elimina un comercio
 app.delete('/api/comercios/:id', (req, res) => {
