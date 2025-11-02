@@ -153,6 +153,7 @@ app.post('/api/comercios', (req, res) => {
         publicidad: newComercioData.publicidad || 1,
         renovacionAutomatica: newComercioData.publicidad > 1 ? newComercioData.renovacionAutomatica : false,
         vencimientoPublicidad: vencimiento,
+        calificaciones: [], // Inicia con un array vacío
     };
     db.comercios.push(newComercio);
     res.status(201).json(newComercio);
@@ -207,6 +208,29 @@ app.post('/api/comercios/:id/upgrade', (req, res) => {
         updatedComercio: db.comercios[comercioIndex],
         newPago,
     });
+});
+
+// [POST] /api/comercios/:id/calificar - Añade una nueva calificación
+app.post('/api/comercios/:id/calificar', (req, res) => {
+    const { id } = req.params;
+    const { rating } = req.body;
+    const comercioIndex = db.comercios.findIndex(c => c.id === id);
+
+    if (comercioIndex === -1) {
+        return res.status(404).json({ error: 'Comercio no encontrado.' });
+    }
+    if (typeof rating !== 'number' || rating < 1 || rating > 5) {
+        return res.status(400).json({ error: 'La calificación debe ser un número entre 1 y 5.' });
+    }
+
+    if (!db.comercios[comercioIndex].calificaciones) {
+        db.comercios[comercioIndex].calificaciones = [];
+    }
+
+    db.comercios[comercioIndex].calificaciones.push(rating);
+    
+    console.log(`Nueva calificación de ${rating} para el comercio ${id}`);
+    res.status(200).json(db.comercios[comercioIndex]);
 });
 
 
