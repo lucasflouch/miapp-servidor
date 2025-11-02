@@ -147,11 +147,17 @@ app.post('/api/comercios', (req, res) => {
     if (!newComercioData.nombre || !newComercioData.usuarioId) {
         return res.status(400).json({ error: 'Faltan datos obligatorios para crear el comercio.' });
     }
+
+    const vencimiento = newComercioData.publicidad > 1
+        ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+        : undefined;
+
     const newComercio = {
         id: `co-${uuid.v4()}`, // Uso corregido
         ...newComercioData,
-        // Por defecto, un comercio nuevo es de publicidad nivel 1 (gratis)
-        publicidad: newComercioData.publicidad || 1, 
+        publicidad: newComercioData.publicidad || 1,
+        renovacionAutomatica: newComercioData.publicidad > 1 ? newComercioData.renovacionAutomatica : false,
+        vencimientoPublicidad: vencimiento,
     };
     db.comercios.push(newComercio);
     res.status(201).json(newComercio);
@@ -189,8 +195,10 @@ app.post('/api/comercios/:id/upgrade', (req, res) => {
         return res.status(400).json({ error: 'Nivel de publicidad inválido.' });
     }
 
-    // 1. Actualizar el nivel del comercio
+    // 1. Actualizar el nivel del comercio y la fecha de vencimiento
     db.comercios[comercioIndex].publicidad = newLevel;
+    db.comercios[comercioIndex].vencimientoPublicidad = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    // La renovación automática se mantiene como estaba, se puede cambiar desde el panel.
 
     // 2. Crear un registro de pago simulado
     const newPago = {
@@ -202,7 +210,7 @@ app.post('/api/comercios/:id/upgrade', (req, res) => {
     };
     db.pagos.push(newPago);
 
-    console.log(`Comercio ${id} mejorado a nivel ${newLevel}. Pago simulado: ${newPago.id}`);
+    console.log(`Comercio ${id} mejorado a nivel ${newLevel}. Vence el ${db.comercios[comercioIndex].vencimientoPublicidad}`);
 
     // 3. Devolver el comercio actualizado y el nuevo pago
     res.status(200).json({
