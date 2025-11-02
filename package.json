@@ -1,14 +1,19 @@
 {
-  "name": "miapp-servidor",
+  "name": "guia-comercial-backend",
   "version": "1.0.0",
-  "type": "commonjs",
+  "description": "Backend para la aplicación GuíaComercial",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
+  "author": "",
+  "license": "ISC",
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^4.21.2",
-    "sqlite3": "^5.1.7"
+    "express": "^4.19.2",
+    "uuid": "^9.0.1"
+  },
+  "engines": {
+    "node": "20.x"
   }
 }
