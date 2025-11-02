@@ -1,7 +1,7 @@
 // server.js
 const express = require('express');
 const cors = require('cors');
-const { v4: uuidv4 } = require('uuid');
+const uuid = require('uuid');
 const { initialData } = require('./mockData.js');
 
 const app = express();
@@ -54,7 +54,7 @@ app.post('/api/register', (req, res) => {
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString(); // Código de 6 dígitos
     
     const newUser = {
-        id: uuidv4(),
+        id: uuid.v4(),
         nombre,
         email,
         password, // IMPORTANTE: En una app real, la contraseña debe ser "hasheada" (ej: con bcrypt)
@@ -148,7 +148,7 @@ app.post('/api/comercios', (req, res) => {
         return res.status(400).json({ error: 'Faltan datos obligatorios para crear el comercio.' });
     }
     const newComercio = {
-        id: `co-${uuidv4()}`, // Generamos un ID único
+        id: `co-${uuid.v4()}`, // Generamos un ID único
         ...newComercioData,
         // Por defecto, un comercio nuevo es de publicidad nivel 1 (gratis)
         publicidad: newComercioData.publicidad || 1, 
@@ -194,7 +194,7 @@ app.post('/api/comercios/:id/upgrade', (req, res) => {
 
     // 2. Crear un registro de pago simulado
     const newPago = {
-        id: `pay-${uuidv4()}`,
+        id: `pay-${uuid.v4()}`,
         comercioId: id,
         monto: AD_PRICES[newLevel],
         fecha: new Date().toISOString(),
