@@ -159,4 +159,7 @@ const initialData = {
   ],
 };
 
-module.exports = { initialData };
+// Se exporta una función que devuelve una copia profunda para evitar problemas de caché.
+module.exports = { 
+  getInitialData: () => JSON.parse(JSON.stringify(initialData))
+};

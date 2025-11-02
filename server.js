@@ -1,23 +1,21 @@
 // server.js
 const express = require('express');
 const cors = require('cors');
-const uuid = require('uuid'); // Importación corregida para máxima compatibilidad
-const { initialData } = require('./mockData.js');
+const uuid = require('uuid');
+const { getInitialData } = require('./mockData.js'); // Importamos la nueva función
 
 const app = express();
-// Usamos el puerto que nos asigne el proveedor de hosting (como Render), o 3001 para desarrollo local.
 const PORT = process.env.PORT || 3001;
 
 // --- Middleware ---
-app.use(cors()); // Habilita CORS para que el frontend pueda hacer peticiones.
-// Aumentamos el límite del payload para poder recibir imágenes en base64.
+app.use(cors());
 app.use(express.json({ limit: '10mb' })); 
 
 // --- "Base de datos" en memoria ---
-// Hacemos una copia profunda de los datos iniciales para poder modificarlos y resetearlos.
-let db = JSON.parse(JSON.stringify(initialData));
+// Usamos la función para obtener una copia limpia al iniciar
+let db = getInitialData();
 
-// --- Mapa de precios de prueba (debe coincidir con el frontend) ---
+// --- Mapa de precios de prueba ---
 const AD_PRICES = {
     1: 0,
     2: 1500,
@@ -37,7 +35,8 @@ app.get('/api/data', (req, res) => {
 // [POST] /api/reset-data - Restaura los datos al estado inicial
 app.post('/api/reset-data', (req, res) => {
     console.log("Restaurando datos iniciales...");
-    db = JSON.parse(JSON.stringify(initialData)); // Volvemos a copiar los datos originales
+    // Volvemos a llamar a la función para garantizar una copia 100% nueva
+    db = getInitialData(); 
     res.status(200).json({ message: 'Datos restaurados con éxito.' });
 });
 
@@ -51,13 +50,13 @@ app.post('/api/register', (req, res) => {
         return res.status(409).json({ error: 'El email ya está registrado.' });
     }
 
-    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString(); // Código de 6 dígitos
+    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
     
     const newUser = {
-        id: uuid.v4(), // Uso corregido
+        id: uuid.v4(),
         nombre,
         email,
-        password, // IMPORTANTE: En una app real, la contraseña debe ser "hasheada" (ej: con bcrypt)
+        password,
         telefono: telefono || null,
         isVerified: false,
         verificationCode,
@@ -66,7 +65,6 @@ app.post('/api/register', (req, res) => {
     
     console.log(`Usuario registrado: ${email}, Código: ${verificationCode}`);
 
-    // En la demo, no se envía un email real. Devolvemos el código para simular el proceso.
     res.status(201).json({
         message: 'Registro exitoso. Por favor, verifica tu cuenta.',
         email: newUser.email,
@@ -90,9 +88,8 @@ app.post('/api/verify', (req, res) => {
     }
     
     user.isVerified = true;
-    delete user.verificationCode; // Limpiamos el código una vez usado
+    delete user.verificationCode;
     
-    // Devolvemos los datos del usuario sin la contraseña
     const { password, ...userWithoutPassword } = user;
     res.status(200).json(userWithoutPassword);
 });
@@ -109,12 +106,10 @@ app.post('/api/login', (req, res) => {
     if (!user.isVerified) {
         return res.status(403).json({ error: 'Tu cuenta no ha sido verificada. Por favor, revisá tu email.' });
     }
-    // IMPORTANTE: En una app real, se comparan contraseñas "hasheadas"
     if (user.password !== inputPassword) { 
         return res.status(401).json({ error: 'Email o contraseña incorrectos.' });
     }
     
-    // Devolvemos el usuario sin la contraseña
     const { password, ...userToReturn } = user;
     res.status(200).json(userToReturn);
 });
@@ -153,7 +148,7 @@ app.post('/api/comercios', (req, res) => {
         : undefined;
 
     const newComercio = {
-        id: `co-${uuid.v4()}`, // Uso corregido
+        id: `co-${uuid.v4()}`,
         ...newComercioData,
         publicidad: newComercioData.publicidad || 1,
         renovacionAutomatica: newComercioData.publicidad > 1 ? newComercioData.renovacionAutomatica : false,
@@ -173,7 +168,6 @@ app.put('/api/comercios/:id', (req, res) => {
         return res.status(404).json({ error: 'Comercio no encontrado.' });
     }
 
-    // Fusionamos los datos antiguos con los nuevos
     db.comercios[comercioIndex] = {
         ...db.comercios[comercioIndex],
         ...updatedData
@@ -195,14 +189,11 @@ app.post('/api/comercios/:id/upgrade', (req, res) => {
         return res.status(400).json({ error: 'Nivel de publicidad inválido.' });
     }
 
-    // 1. Actualizar el nivel del comercio y la fecha de vencimiento
     db.comercios[comercioIndex].publicidad = newLevel;
     db.comercios[comercioIndex].vencimientoPublicidad = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-    // La renovación automática se mantiene como estaba, se puede cambiar desde el panel.
-
-    // 2. Crear un registro de pago simulado
+    
     const newPago = {
-        id: `pay-${uuid.v4()}`, // Uso corregido
+        id: `pay-${uuid.v4()}`,
         comercioId: id,
         monto: AD_PRICES[newLevel],
         fecha: new Date().toISOString(),
@@ -212,7 +203,6 @@ app.post('/api/comercios/:id/upgrade', (req, res) => {
 
     console.log(`Comercio ${id} mejorado a nivel ${newLevel}. Vence el ${db.comercios[comercioIndex].vencimientoPublicidad}`);
 
-    // 3. Devolver el comercio actualizado y el nuevo pago
     res.status(200).json({
         updatedComercio: db.comercios[comercioIndex],
         newPago,
@@ -230,7 +220,6 @@ app.delete('/api/comercios/:id', (req, res) => {
         return res.status(404).json({ error: 'Comercio no encontrado para eliminar.' });
     }
     
-    // Eliminamos también los banners y pagos asociados
     db.banners = db.banners.filter(b => b.comercioId !== id);
     db.pagos = db.pagos.filter(p => p.comercioId !== id);
 
