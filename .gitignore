@@ -1,0 +1,14 @@
+# Ignorar la carpeta de dependencias de Node.js
+node_modules
+
+# Archivos de entorno (si los tuvieras en el futuro)
+.env
+.env.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Base de datos local (para que no se suba la de prueba)
+guia_comercial.db
