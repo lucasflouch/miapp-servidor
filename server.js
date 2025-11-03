@@ -1,256 +1,369 @@
 // server.js
 const express = require('express');
 const cors = require('cors');
-const uuid = require('uuid');
-const { getInitialData } = require('./mockData.js'); // Importamos la nueva función
+const { v4: uuidv4 } = require('uuid');
+const { Pool } = require('pg'); // Importamos el cliente de PostgreSQL
+const { getInitialData } = require('./mockData.js');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// --- Middleware ---
+// --- Configuración de la Base de Datos PostgreSQL ---
+// El servidor se conectará usando la URL que guardamos en las variables de entorno de Render.
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false // Necesario para conexiones remotas en producción
+});
+
+pool.connect()
+  .then(() => {
+    console.log('Conectado a la base de datos PostgreSQL.');
+    initializeDb();
+  })
+  .catch(err => console.error('Error al conectar con la base de datos PostgreSQL', err.stack));
+
+
 app.use(cors());
-app.use(express.json({ limit: '10mb' })); 
+app.use(express.json({ limit: '10mb' }));
 
-// --- "Base de datos" en memoria ---
-// Usamos la función para obtener una copia limpia al iniciar
-let db = getInitialData();
+const AD_PRICES = { 1: 0, 2: 1500, 3: 3000, 4: 5000, 5: 8000, 6: 12000 };
 
-// --- Mapa de precios de prueba ---
-const AD_PRICES = {
-    1: 0,
-    2: 1500,
-    3: 3000,
-    4: 5000,
-    5: 8000,
-    6: 12000,
+// --- Inicialización de la Base de Datos ---
+const initializeDb = async () => {
+  try {
+    console.log('Inicializando esquema de la base de datos si no existe...');
+    // Usamos sintaxis de PostgreSQL (VARCHAR, TEXT, INTEGER, BOOLEAN, TIMESTAMP, JSONB para arrays)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS usuarios (
+        id TEXT PRIMARY KEY,
+        nombre VARCHAR(255) NOT NULL,
+        email VARCHAR(255) NOT NULL UNIQUE,
+        password TEXT NOT NULL,
+        telefono VARCHAR(50),
+        "isVerified" BOOLEAN DEFAULT false,
+        "verificationCode" TEXT
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS comercios (
+        id TEXT PRIMARY KEY,
+        nombre VARCHAR(255) NOT NULL,
+        "imagenUrl" TEXT NOT NULL,
+        "rubroId" TEXT,
+        "subRubroId" TEXT,
+        "provinciaId" TEXT,
+        "provinciaNombre" VARCHAR(255),
+        "ciudadId" TEXT,
+        "ciudadNombre" VARCHAR(255),
+        barrio VARCHAR(255),
+        "usuarioId" TEXT,
+        whatsapp VARCHAR(50),
+        direccion TEXT,
+        "googleMapsUrl" TEXT,
+        "websiteUrl" TEXT,
+        description TEXT,
+        "galeriaImagenes" JSONB,
+        publicidad INTEGER,
+        "renovacionAutomatica" BOOLEAN,
+        "vencimientoPublicidad" TIMESTAMP,
+        calificaciones JSONB,
+        FOREIGN KEY ("usuarioId") REFERENCES usuarios(id) ON DELETE CASCADE
+      );
+    `);
+    
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS banners (
+          id TEXT PRIMARY KEY,
+          "comercioId" TEXT,
+          "imagenUrl" TEXT,
+          "venceEl" TIMESTAMP,
+          FOREIGN KEY ("comercioId") REFERENCES comercios(id) ON DELETE CASCADE
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS pagos (
+          id TEXT PRIMARY KEY,
+          "comercioId" TEXT,
+          monto REAL,
+          fecha TIMESTAMP,
+          "mercadoPagoId" TEXT,
+          FOREIGN KEY ("comercioId") REFERENCES comercios(id) ON DELETE CASCADE
+      );
+    `);
+
+    const res = await pool.query('SELECT COUNT(id) as count FROM usuarios');
+    if (res.rows[0].count === '0') {
+      console.log('Base de datos vacía. Poblando con datos iniciales...');
+      await populateDatabase();
+    } else {
+      console.log('La base de datos ya contiene datos.');
+    }
+  } catch (err) {
+    console.error('Error al inicializar la base de datos:', err.stack);
+  }
 };
 
-// --- Endpoints de la API ---
+const populateDatabase = async () => {
+    const data = getInitialData();
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN'); // Iniciar transacción
 
-// [GET] /api/data - Devuelve todos los datos de la "base de datos"
-app.get('/api/data', (req, res) => {
-    res.json(db);
-});
-
-// [POST] /api/reset-data - Restaura los datos al estado inicial
-app.post('/api/reset-data', (req, res) => {
-    console.log("Restaurando datos iniciales...");
-    // Volvemos a llamar a la función para garantizar una copia 100% nueva
-    db = getInitialData(); 
-    res.status(200).json({ message: 'Datos restaurados con éxito.' });
-});
-
-// [POST] /api/register - Registra un nuevo usuario
-app.post('/api/register', (req, res) => {
-    const { nombre, email, password, telefono } = req.body;
-    if (!nombre || !email || !password) {
-        return res.status(400).json({ error: 'Nombre, email y contraseña son obligatorios.' });
+        for (const u of data.usuarios) {
+            await client.query('INSERT INTO usuarios (id, nombre, email, password, telefono, "isVerified") VALUES ($1, $2, $3, $4, $5, $6)', [u.id, u.nombre, u.email, u.password, u.telefono, true]);
+        }
+        for (const c of data.comercios) {
+            await client.query('INSERT INTO comercios (id, nombre, "imagenUrl", "rubroId", "subRubroId", "provinciaId", "provinciaNombre", "ciudadId", "ciudadNombre", barrio, "usuarioId", whatsapp, direccion, "googleMapsUrl", "websiteUrl", description, "galeriaImagenes", publicidad, "renovacionAutomatica", "vencimientoPublicidad", calificaciones) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)', [c.id, c.nombre, c.imagenUrl, c.rubroId, c.subRubroId, c.provinciaId, c.provinciaNombre, c.ciudadId, c.ciudadNombre, c.barrio, c.usuarioId, c.whatsapp, c.direccion, c.googleMapsUrl, c.websiteUrl, c.description, JSON.stringify(c.galeriaImagenes), c.publicidad, c.renovacionAutomatica, c.vencimientoPublicidad, JSON.stringify(c.calificaciones)]);
+        }
+        for (const b of data.banners) {
+            await client.query('INSERT INTO banners (id, "comercioId", "imagenUrl", "venceEl") VALUES ($1, $2, $3, $4)', [b.id, b.comercioId, b.imagenUrl, b.venceEl]);
+        }
+        for (const p of data.pagos) {
+            await client.query('INSERT INTO pagos (id, "comercioId", monto, fecha, "mercadoPagoId") VALUES ($1, $2, $3, $4, $5)', [p.id, p.comercioId, p.monto, p.fecha, p.mercadoPagoId]);
+        }
+        
+        await client.query('COMMIT'); // Confirmar transacción
+        console.log("Datos de prueba insertados con éxito.");
+    } catch (err) {
+        await client.query('ROLLBACK'); // Deshacer en caso de error
+        console.error('Error al poblar la base de datos, transacción deshecha.', err.stack);
+    } finally {
+        client.release(); // Liberar cliente
     }
-    if (db.usuarios.some(u => u.email === email)) {
-        return res.status(409).json({ error: 'El email ya está registrado.' });
-    }
+};
 
-    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-    
-    const newUser = {
-        id: uuid.v4(),
-        nombre,
-        email,
-        password,
-        telefono: telefono || null,
-        isVerified: false,
-        verificationCode,
+// --- API Endpoints (Reescritos para PostgreSQL) ---
+
+app.get('/api/data', async (req, res) => {
+  try {
+    const initialStaticData = getInitialData();
+    const data = {
+      provincias: initialStaticData.provincias,
+      ciudades: initialStaticData.ciudades,
+      rubros: initialStaticData.rubros,
+      subRubros: initialStaticData.subRubros,
     };
-    db.usuarios.push(newUser);
-    
-    console.log(`Usuario registrado: ${email}, Código: ${verificationCode}`);
 
-    res.status(201).json({
-        message: 'Registro exitoso. Por favor, verifica tu cuenta.',
-        email: newUser.email,
-        verificationCode: newUser.verificationCode,
+    const [usuariosRes, comerciosRes, bannersRes, pagosRes] = await Promise.all([
+        pool.query('SELECT * FROM usuarios'),
+        pool.query('SELECT * FROM comercios'),
+        pool.query('SELECT * FROM banners'),
+        pool.query('SELECT * FROM pagos')
+    ]);
+
+    res.json({
+        ...data,
+        usuarios: usuariosRes.rows,
+        comercios: comerciosRes.rows,
+        banners: bannersRes.rows,
+        pagos: pagosRes.rows,
     });
+  } catch (err) {
+    console.error(err.stack);
+    res.status(500).json({ error: 'Error al obtener los datos de la base de datos' });
+  }
 });
 
-// [POST] /api/verify - Verifica la cuenta de un usuario con el código
-app.post('/api/verify', (req, res) => {
+app.post('/api/reset-data', async (req, res) => {
+    console.log("Restaurando datos iniciales...");
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        await client.query('TRUNCATE usuarios, comercios, banners, pagos RESTART IDENTITY CASCADE');
+        await client.query('COMMIT');
+        await populateDatabase(); // Re-poblar la base
+        res.status(200).json({ message: 'Datos restaurados con éxito.' });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('Error al restaurar datos:', err.stack);
+        res.status(500).json({ error: 'No se pudieron restaurar los datos.' });
+    } finally {
+        client.release();
+    }
+});
+
+
+app.post('/api/register', async (req, res) => {
+    const { nombre, email, password, telefono } = req.body;
+    if (!nombre || !email || !password) return res.status(400).json({ error: 'Faltan datos.' });
+
+    try {
+        const existingUser = await pool.query('SELECT email FROM usuarios WHERE email = $1', [email]);
+        if (existingUser.rows.length > 0) {
+            return res.status(409).json({ error: 'El email ya está registrado.' });
+        }
+
+        const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+        const newUser = { id: uuidv4(), nombre, email, password, telefono: telefono || null, verificationCode };
+
+        await pool.query('INSERT INTO usuarios (id, nombre, email, password, telefono, "verificationCode") VALUES ($1, $2, $3, $4, $5, $6)',
+            [newUser.id, newUser.nombre, newUser.email, newUser.password, newUser.telefono, newUser.verificationCode]);
+
+        console.log(`Usuario registrado: ${email}, Código: ${verificationCode}`);
+        res.status(201).json({ message: 'Registro exitoso.', email: newUser.email, verificationCode });
+
+    } catch (err) {
+        console.error(err.stack);
+        res.status(500).json({ error: 'Error interno del servidor.' });
+    }
+});
+
+app.post('/api/verify', async (req, res) => {
     const { email, code } = req.body;
-    const user = db.usuarios.find(u => u.email === email);
+    try {
+        const result = await pool.query('SELECT * FROM usuarios WHERE email = $1', [email]);
+        const user = result.rows[0];
+        
+        if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
+        if (user.isVerified) return res.status(400).json({ error: 'El usuario ya está verificado.' });
+        if (user.verificationCode !== code) return res.status(400).json({ error: 'Código de verificación incorrecto.' });
 
-    if (!user) {
-        return res.status(404).json({ error: 'Usuario no encontrado.' });
+        await pool.query('UPDATE usuarios SET "isVerified" = true, "verificationCode" = NULL WHERE id = $1', [user.id]);
+        
+        delete user.password;
+        delete user.verificationCode;
+        user.isVerified = true;
+        res.status(200).json(user);
+
+    } catch (err) {
+        console.error(err.stack);
+        res.status(500).json({ error: 'Error interno del servidor.' });
     }
-    if (user.isVerified) {
-        return res.status(400).json({ error: 'El usuario ya está verificado.' });
-    }
-    if (user.verificationCode !== code) {
-        return res.status(400).json({ error: 'Código de verificación incorrecto.' });
-    }
-    
-    user.isVerified = true;
-    delete user.verificationCode;
-    
-    const { password, ...userWithoutPassword } = user;
-    res.status(200).json(userWithoutPassword);
 });
 
-
-// [POST] /api/login - Inicia sesión de un usuario
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
     const { email, password: inputPassword } = req.body;
-    const user = db.usuarios.find(u => u.email === email);
+    try {
+        const result = await pool.query('SELECT * FROM usuarios WHERE email = $1', [email]);
+        const user = result.rows[0];
 
-    if (!user) {
-        return res.status(404).json({ error: 'Email o contraseña incorrectos.' });
+        if (!user || user.password !== inputPassword) return res.status(401).json({ error: 'Email o contraseña incorrectos.' });
+        if (!user.isVerified) return res.status(403).json({ error: 'Tu cuenta no ha sido verificada.' });
+        
+        delete user.password;
+        res.status(200).json(user);
+
+    } catch (err) {
+        console.error(err.stack);
+        res.status(500).json({ error: 'Error interno del servidor.' });
     }
-    if (!user.isVerified) {
-        return res.status(403).json({ error: 'Tu cuenta no ha sido verificada. Por favor, revisá tu email.' });
-    }
-    if (user.password !== inputPassword) { 
-        return res.status(401).json({ error: 'Email o contraseña incorrectos.' });
-    }
-    
-    const { password, ...userToReturn } = user;
-    res.status(200).json(userToReturn);
 });
 
-// [PUT] /api/usuarios/:id - Actualiza los datos de un usuario
-app.put('/api/usuarios/:id', (req, res) => {
+
+app.put('/api/usuarios/:id', async (req, res) => {
     const { id } = req.params;
     const { nombre, telefono } = req.body;
-    const userIndex = db.usuarios.findIndex(u => u.id === id);
-
-    if (userIndex === -1) {
-        return res.status(404).json({ error: 'Usuario no encontrado.' });
+    try {
+        await pool.query('UPDATE usuarios SET nombre = $1, telefono = $2 WHERE id = $3', [nombre, telefono, id]);
+        const result = await pool.query('SELECT * FROM usuarios WHERE id = $1', [id]);
+        const user = result.rows[0];
+        delete user.password;
+        res.status(200).json(user);
+    } catch (err) {
+        console.error(err.stack);
+        res.status(500).json({ error: 'Error al actualizar usuario.' });
     }
-
-    const updatedUser = {
-        ...db.usuarios[userIndex],
-        nombre: nombre || db.usuarios[userIndex].nombre,
-        telefono: telefono !== undefined ? telefono : db.usuarios[userIndex].telefono,
-    };
-    db.usuarios[userIndex] = updatedUser;
-    
-    const { password, ...userToReturn } = updatedUser;
-    res.status(200).json(userToReturn);
 });
 
 
-// [POST] /api/comercios - Crea un nuevo comercio
-app.post('/api/comercios', (req, res) => {
-    const newComercioData = req.body;
-    if (!newComercioData.nombre || !newComercioData.usuarioId) {
-        return res.status(400).json({ error: 'Faltan datos obligatorios para crear el comercio.' });
-    }
-
-    const vencimiento = newComercioData.publicidad > 1
-        ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
-        : undefined;
-
+app.post('/api/comercios', async (req, res) => {
+    const data = req.body;
+    const vencimiento = data.publicidad > 1 ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : null;
     const newComercio = {
-        id: `co-${uuid.v4()}`,
-        ...newComercioData,
-        publicidad: newComercioData.publicidad || 1,
-        renovacionAutomatica: newComercioData.publicidad > 1 ? newComercioData.renovacionAutomatica : false,
+        id: `co-${uuidv4()}`,
+        ...data,
+        publicidad: data.publicidad || 1,
+        renovacionAutomatica: data.publicidad > 1 ? data.renovacionAutomatica : false,
         vencimientoPublicidad: vencimiento,
-        calificaciones: [], // Inicia con un array vacío
-    };
-    db.comercios.push(newComercio);
-    res.status(201).json(newComercio);
-});
-
-// [PUT] /api/comercios/:id - Actualiza un comercio existente
-app.put('/api/comercios/:id', (req, res) => {
-    const { id } = req.params;
-    const updatedData = req.body;
-    const comercioIndex = db.comercios.findIndex(c => c.id === id);
-
-    if (comercioIndex === -1) {
-        return res.status(404).json({ error: 'Comercio no encontrado.' });
-    }
-
-    db.comercios[comercioIndex] = {
-        ...db.comercios[comercioIndex],
-        ...updatedData
+        calificaciones: [],
     };
     
-    res.status(200).json(db.comercios[comercioIndex]);
+    try {
+        await pool.query('INSERT INTO comercios (id, nombre, "imagenUrl", "rubroId", "subRubroId", "provinciaId", "provinciaNombre", "ciudadId", "ciudadNombre", barrio, "usuarioId", whatsapp, direccion, "googleMapsUrl", "websiteUrl", description, "galeriaImagenes", publicidad, "renovacionAutomatica", "vencimientoPublicidad", calificaciones) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)',
+            [newComercio.id, newComercio.nombre, newComercio.imagenUrl, newComercio.rubroId, newComercio.subRubroId, newComercio.provinciaId, newComercio.provinciaNombre, newComercio.ciudadId, newComercio.ciudadNombre, newComercio.barrio, newComercio.usuarioId, newComercio.whatsapp, newComercio.direccion, newComercio.googleMapsUrl, newComercio.websiteUrl, newComercio.description, JSON.stringify(newComercio.galeriaImagenes), newComercio.publicidad, newComercio.renovacionAutomatica, newComercio.vencimientoPublicidad, JSON.stringify(newComercio.calificaciones)]);
+        res.status(201).json(newComercio);
+    } catch (err) {
+        console.error(err.stack);
+        res.status(500).json({ error: 'Error al crear el comercio.' });
+    }
 });
 
-// [POST] /api/comercios/:id/upgrade - Simula el pago y la mejora de un plan
-app.post('/api/comercios/:id/upgrade', (req, res) => {
+
+app.put('/api/comercios/:id', async (req, res) => {
+    const { id } = req.params;
+    const { nombre, imagenUrl, rubroId, subRubroId, provinciaId, provinciaNombre, ciudadId, ciudadNombre, barrio, whatsapp, direccion, googleMapsUrl, websiteUrl, description, galeriaImagenes, renovacionAutomatica } = req.body;
+    try {
+        await pool.query('UPDATE comercios SET nombre=$1, "imagenUrl"=$2, "rubroId"=$3, "subRubroId"=$4, "provinciaId"=$5, "provinciaNombre"=$6, "ciudadId"=$7, "ciudadNombre"=$8, barrio=$9, whatsapp=$10, direccion=$11, "googleMapsUrl"=$12, "websiteUrl"=$13, description=$14, "galeriaImagenes"=$15, "renovacionAutomatica"=$16 WHERE id = $17',
+            [nombre, imagenUrl, rubroId, subRubroId, provinciaId, provinciaNombre, ciudadId, ciudadNombre, barrio, whatsapp, direccion, googleMapsUrl, websiteUrl, description, JSON.stringify(galeriaImagenes), renovacionAutomatica, id]);
+        
+        const result = await pool.query('SELECT * FROM comercios WHERE id = $1', [id]);
+        res.status(200).json(result.rows[0]);
+    } catch (err) {
+        console.error(err.stack);
+        res.status(500).json({ error: 'Error al actualizar el comercio.' });
+    }
+});
+
+app.post('/api/comercios/:id/upgrade', async (req, res) => {
     const { id } = req.params;
     const { newLevel } = req.body;
-    const comercioIndex = db.comercios.findIndex(c => c.id === id);
+    const vencimiento = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
-    if (comercioIndex === -1) {
-        return res.status(404).json({ error: 'Comercio no encontrado.' });
+    try {
+        await pool.query('UPDATE comercios SET publicidad = $1, "vencimientoPublicidad" = $2 WHERE id = $3', [newLevel, vencimiento, id]);
+        
+        const newPago = { id: `pay-${uuidv4()}`, comercioId: id, monto: AD_PRICES[newLevel], fecha: new Date(), mercadoPagoId: `mp-test-${Date.now()}`};
+        await pool.query('INSERT INTO pagos (id, "comercioId", monto, fecha, "mercadoPagoId") VALUES ($1,$2,$3,$4,$5)',
+            [newPago.id, newPago.comercioId, newPago.monto, newPago.fecha, newPago.mercadoPagoId]);
+
+        const result = await pool.query('SELECT * FROM comercios WHERE id = $1', [id]);
+        res.status(200).json({ updatedComercio: result.rows[0], newPago });
+
+    } catch (err) {
+        console.error(err.stack);
+        res.status(500).json({ error: 'Error al actualizar el plan.' });
     }
-    if (!newLevel || !AD_PRICES.hasOwnProperty(newLevel)) {
-        return res.status(400).json({ error: 'Nivel de publicidad inválido.' });
-    }
-
-    db.comercios[comercioIndex].publicidad = newLevel;
-    db.comercios[comercioIndex].vencimientoPublicidad = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-    
-    const newPago = {
-        id: `pay-${uuid.v4()}`,
-        comercioId: id,
-        monto: AD_PRICES[newLevel],
-        fecha: new Date().toISOString(),
-        mercadoPagoId: `mp-test-${Date.now()}`,
-    };
-    db.pagos.push(newPago);
-
-    console.log(`Comercio ${id} mejorado a nivel ${newLevel}. Vence el ${db.comercios[comercioIndex].vencimientoPublicidad}`);
-
-    res.status(200).json({
-        updatedComercio: db.comercios[comercioIndex],
-        newPago,
-    });
 });
 
-// [POST] /api/comercios/:id/calificar - Añade una nueva calificación
-app.post('/api/comercios/:id/calificar', (req, res) => {
+app.post('/api/comercios/:id/calificar', async (req, res) => {
     const { id } = req.params;
     const { rating } = req.body;
-    const comercioIndex = db.comercios.findIndex(c => c.id === id);
+    if (typeof rating !== 'number' || rating < 1 || rating > 5) return res.status(400).json({ error: 'Calificación inválida.' });
 
-    if (comercioIndex === -1) {
-        return res.status(404).json({ error: 'Comercio no encontrado.' });
-    }
-    if (typeof rating !== 'number' || rating < 1 || rating > 5) {
-        return res.status(400).json({ error: 'La calificación debe ser un número entre 1 y 5.' });
-    }
+    try {
+        const result = await pool.query('SELECT calificaciones FROM comercios WHERE id = $1', [id]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Comercio no encontrado.' });
 
-    if (!db.comercios[comercioIndex].calificaciones) {
-        db.comercios[comercioIndex].calificaciones = [];
+        const calificaciones = result.rows[0].calificaciones || [];
+        calificaciones.push(rating);
+        
+        await pool.query('UPDATE comercios SET calificaciones = $1 WHERE id = $2', [JSON.stringify(calificaciones), id]);
+        
+        const updatedResult = await pool.query('SELECT * FROM comercios WHERE id = $1', [id]);
+        res.status(200).json(updatedResult.rows[0]);
+        
+    } catch (err) {
+        console.error(err.stack);
+        res.status(500).json({ error: 'Error al guardar la calificación.' });
     }
-
-    db.comercios[comercioIndex].calificaciones.push(rating);
-    
-    console.log(`Nueva calificación de ${rating} para el comercio ${id}`);
-    res.status(200).json(db.comercios[comercioIndex]);
 });
 
 
-// [DELETE] /api/comercios/:id - Elimina un comercio
-app.delete('/api/comercios/:id', (req, res) => {
+app.delete('/api/comercios/:id', async (req, res) => {
     const { id } = req.params;
-    const initialLength = db.comercios.length;
-    db.comercios = db.comercios.filter(c => c.id !== id);
-    
-    if (db.comercios.length === initialLength) {
-        return res.status(404).json({ error: 'Comercio no encontrado para eliminar.' });
+    try {
+        // La restricción ON DELETE CASCADE en la DB se encarga de borrar banners y pagos.
+        await pool.query('DELETE FROM comercios WHERE id = $1', [id]);
+        res.status(200).json({ message: 'Comercio eliminado con éxito.' });
+    } catch (err) {
+        console.error(err.stack);
+        res.status(500).json({ error: 'Error al eliminar el comercio.' });
     }
-    
-    db.banners = db.banners.filter(b => b.comercioId !== id);
-    db.pagos = db.pagos.filter(p => p.comercioId !== id);
-
-    res.status(200).json({ message: 'Comercio eliminado con éxito.' });
 });
 
 // --- Iniciar Servidor ---
 app.listen(PORT, () => {
-    console.log(`Servidor de GuíaComercial escuchando en http://localhost:${PORT}`);
+  console.log(`Servidor de GuíaComercial escuchando en http://localhost:${PORT}`);
 });
