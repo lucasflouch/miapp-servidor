@@ -92,6 +92,19 @@ const initializeDb = async () => {
           FOREIGN KEY ("comercioId") REFERENCES comercios(id) ON DELETE CASCADE
       );
     `);
+    
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public_usuarios (
+        id TEXT PRIMARY KEY,
+        nombre VARCHAR(255) NOT NULL,
+        apellido VARCHAR(255) NOT NULL,
+        email VARCHAR(255) NOT NULL UNIQUE,
+        password TEXT NOT NULL,
+        whatsapp VARCHAR(50),
+        favorites JSONB,
+        history JSONB
+      );
+    `);
 
     const res = await pool.query('SELECT COUNT(id) as count FROM usuarios');
     if (res.rows[0].count === '0') {
@@ -171,7 +184,7 @@ app.post('/api/reset-data', async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        await client.query('TRUNCATE usuarios, comercios, banners, pagos RESTART IDENTITY CASCADE');
+        await client.query('TRUNCATE usuarios, comercios, banners, pagos, public_usuarios RESTART IDENTITY CASCADE');
         await client.query('COMMIT');
         await populateDatabase(); // Re-poblar la base
         res.status(200).json({ message: 'Datos restaurados con éxito.' });
@@ -362,6 +375,95 @@ app.delete('/api/comercios/:id', async (req, res) => {
         res.status(500).json({ error: 'Error al eliminar el comercio.' });
     }
 });
+
+// --- Public User Endpoints ---
+
+app.post('/api/public-register', async (req, res) => {
+    const { nombre, apellido, email, password, whatsapp } = req.body;
+    if (!nombre || !apellido || !email || !password) {
+        return res.status(400).json({ error: 'Faltan campos obligatorios.' });
+    }
+
+    try {
+        const existingUser = await pool.query('SELECT email FROM public_usuarios WHERE email = $1', [email]);
+        if (existingUser.rows.length > 0) {
+            return res.status(409).json({ error: 'El email ya está registrado.' });
+        }
+
+        const newUser = {
+            id: `pub-${uuidv4()}`,
+            nombre,
+            apellido,
+            email,
+            password,
+            whatsapp: whatsapp || null,
+            favorites: [],
+            history: [],
+        };
+
+        await pool.query(
+            'INSERT INTO public_usuarios (id, nombre, apellido, email, password, whatsapp, favorites, history) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+            [newUser.id, newUser.nombre, newUser.apellido, newUser.email, newUser.password, newUser.whatsapp, JSON.stringify(newUser.favorites), JSON.stringify(newUser.history)]
+        );
+        
+        delete newUser.password; // Don't send password back
+        res.status(201).json(newUser);
+
+    } catch (err) {
+        console.error(err.stack);
+        res.status(500).json({ error: 'Error interno del servidor al registrar usuario público.' });
+    }
+});
+
+app.post('/api/public-login', async (req, res) => {
+    const { email, password: inputPassword } = req.body;
+    if (!email || !inputPassword) {
+        return res.status(400).json({ error: 'Email y contraseña son requeridos.' });
+    }
+
+    try {
+        const result = await pool.query('SELECT * FROM public_usuarios WHERE email = $1', [email]);
+        const user = result.rows[0];
+
+        if (!user || user.password !== inputPassword) {
+            return res.status(401).json({ error: 'Email o contraseña incorrectos.' });
+        }
+        
+        delete user.password;
+        res.status(200).json(user);
+
+    } catch (err) {
+        console.error(err.stack);
+        res.status(500).json({ error: 'Error interno del servidor al iniciar sesión.' });
+    }
+});
+
+app.put('/api/public-users/:id', async (req, res) => {
+    const { id } = req.params;
+    const { nombre, apellido, whatsapp, favorites, history } = req.body;
+    if (nombre === undefined || apellido === undefined || favorites === undefined || history === undefined) {
+        return res.status(400).json({ error: 'Faltan datos para la actualización.' });
+    }
+
+    try {
+        const result = await pool.query(
+            'UPDATE public_usuarios SET nombre = $1, apellido = $2, whatsapp = $3, favorites = $4, history = $5 WHERE id = $6 RETURNING *',
+            [nombre, apellido, whatsapp || null, JSON.stringify(favorites), JSON.stringify(history), id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Usuario público no encontrado.' });
+        }
+        
+        const updatedUser = result.rows[0];
+        delete updatedUser.password;
+        res.status(200).json(updatedUser);
+    } catch (err) {
+        console.error(err.stack);
+        res.status(500).json({ error: 'Error al actualizar el usuario público.' });
+    }
+});
+
 
 // --- Iniciar Servidor ---
 app.listen(PORT, () => {
