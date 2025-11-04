@@ -15,14 +15,6 @@ const pool = new Pool({
   ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false // Necesario para conexiones remotas en producción
 });
 
-pool.connect()
-  .then(() => {
-    console.log('Conectado a la base de datos PostgreSQL.');
-    initializeDb();
-  })
-  .catch(err => console.error('Error al conectar con la base de datos PostgreSQL', err.stack));
-
-
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
@@ -115,6 +107,8 @@ const initializeDb = async () => {
     }
   } catch (err) {
     console.error('Error al inicializar la base de datos:', err.stack);
+    // Lanzamos el error para que el proceso de arranque principal lo capture y se detenga.
+    throw err;
   }
 };
 
@@ -466,6 +460,25 @@ app.put('/api/public-users/:id', async (req, res) => {
 
 
 // --- Iniciar Servidor ---
-app.listen(PORT, () => {
-  console.log(`Servidor de GuíaComercial escuchando en http://localhost:${PORT}`);
-});
+const startServer = async () => {
+  try {
+    // Hacemos una query simple para asegurar que la conexión con la DB está activa
+    // y que el servidor "despierte" si estaba dormido, antes de inicializar.
+    await pool.query('SELECT NOW()');
+    console.log('Conexión con la base de datos PostgreSQL verificada.');
+
+    // Inicializamos la DB y esperamos a que termine para evitar race conditions.
+    await initializeDb();
+    
+    // Solo después de que la DB esté lista, empezamos a escuchar peticiones.
+    app.listen(PORT, () => {
+      console.log(`Servidor de GuíaComercial escuchando en http://localhost:${PORT}`);
+    });
+
+  } catch (err) {
+    console.error('FALLO CRÍTICO AL INICIAR: No se pudo conectar o inicializar la base de datos.', err.stack);
+    process.exit(1); // Terminar el proceso si hay un error crítico al inicio.
+  }
+};
+
+startServer();
