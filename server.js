@@ -180,7 +180,7 @@ const populateDatabase = async () => {
             await client.query('INSERT INTO usuarios (id, nombre, email, password, telefono, "isVerified") VALUES ($1, $2, $3, $4, $5, $6)', [u.id, u.nombre, u.email, u.password, u.telefono, true]);
         }
         for (const c of data.comercios) {
-            await client.query('INSERT INTO comercios (id, nombre, "imagenUrl", "rubroId", "subRubroId", "provinciaId", "provinciaNombre", "ciudadId", "ciudadNombre", barrio, "usuarioId", whatsapp, direccion, "googleMapsUrl", "websiteUrl", description, "galeriaImagenes", publicidad, "renovacionAutomatica", "vencimientoPublicidad", opiniones) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)', [c.id, c.nombre, c.imagenUrl, c.rubroId, c.subRubroId, c.provinciaId, c.provinciaNombre, c.ciudadId, c.ciudadNombre, c.barrio, c.usuarioId, c.whatsapp, c.direccion, c.googleMapsUrl, c.websiteUrl, c.description, JSON.stringify(c.galeriaImagenes), c.publicidad, c.renovacionAutomatica, c.vencimientoPublicidad, JSON.stringify(c.opiniones || [])]);
+            await client.query('INSERT INTO comercios (id, nombre, "imagenUrl", "rubroId", "subRubroId", "provinciaId", "provinciaNombre", "ciudadId", "ciudadNombre", barrio, "usuarioId", whatsapp, direccion, "googleMapsUrl", "websiteUrl", description, "galeriaImagenes", publicidad, "renovacionAutomatica", "vencimientoPublicidad", opiniones) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)', [c.id, c.nombre, c.imagenUrl, c.rubroId, c.subRubroId, c.provinciaId, c.provinciaNombre, c.ciudadId, c.ciudadNombre, c.barrio, c.usuarioId, c.whatsapp, c.direccion, c.googleMapsUrl, c.websiteUrl, c.description, c.galeriaImagenes, c.publicidad, c.renovacionAutomatica, c.vencimientoPublicidad, c.opiniones || []]);
         }
         for (const b of data.banners) {
             await client.query('INSERT INTO banners (id, "comercioId", "imagenUrl", "venceEl") VALUES ($1, $2, $3, $4)', [b.id, b.comercioId, b.imagenUrl, b.venceEl]);
@@ -347,7 +347,7 @@ app.post('/api/comercios', async (req, res) => {
     
     try {
         await queryWithRetry('INSERT INTO comercios (id, nombre, "imagenUrl", "rubroId", "subRubroId", "provinciaId", "provinciaNombre", "ciudadId", "ciudadNombre", barrio, "usuarioId", whatsapp, direccion, "googleMapsUrl", "websiteUrl", description, "galeriaImagenes", publicidad, "renovacionAutomatica", "vencimientoPublicidad", opiniones) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)',
-            [newComercio.id, newComercio.nombre, newComercio.imagenUrl, newComercio.rubroId, newComercio.subRubroId, newComercio.provinciaId, newComercio.provinciaNombre, newComercio.ciudadId, newComercio.ciudadNombre, newComercio.barrio, newComercio.usuarioId, newComercio.whatsapp, newComercio.direccion, newComercio.googleMapsUrl, newComercio.websiteUrl, newComercio.description, JSON.stringify(newComercio.galeriaImagenes), newComercio.publicidad, newComercio.renovacionAutomatica, newComercio.vencimientoPublicidad, JSON.stringify(newComercio.opiniones)]);
+            [newComercio.id, newComercio.nombre, newComercio.imagenUrl, newComercio.rubroId, newComercio.subRubroId, newComercio.provinciaId, newComercio.provinciaNombre, newComercio.ciudadId, newComercio.ciudadNombre, newComercio.barrio, newComercio.usuarioId, newComercio.whatsapp, newComercio.direccion, newComercio.googleMapsUrl, newComercio.websiteUrl, newComercio.description, newComercio.galeriaImagenes, newComercio.publicidad, newComercio.renovacionAutomatica, newComercio.vencimientoPublicidad, newComercio.opiniones]);
         res.status(201).json(newComercio);
     } catch (err) {
         console.error('ERROR EN /api/comercios (POST):', err.stack);
@@ -361,7 +361,7 @@ app.put('/api/comercios/:id', async (req, res) => {
     const { nombre, imagenUrl, rubroId, subRubroId, provinciaId, provinciaNombre, ciudadId, ciudadNombre, barrio, whatsapp, direccion, googleMapsUrl, websiteUrl, description, galeriaImagenes, renovacionAutomatica } = req.body;
     try {
         await queryWithRetry('UPDATE comercios SET nombre=$1, "imagenUrl"=$2, "rubroId"=$3, "subRubroId"=$4, "provinciaId"=$5, "provinciaNombre"=$6, "ciudadId"=$7, "ciudadNombre"=$8, barrio=$9, whatsapp=$10, direccion=$11, "googleMapsUrl"=$12, "websiteUrl"=$13, description=$14, "galeriaImagenes"=$15, "renovacionAutomatica"=$16 WHERE id = $17',
-            [nombre, imagenUrl, rubroId, subRubroId, provinciaId, provinciaNombre, ciudadId, ciudadNombre, barrio, whatsapp, direccion, googleMapsUrl, websiteUrl, description, JSON.stringify(galeriaImagenes), renovacionAutomatica, id]);
+            [nombre, imagenUrl, rubroId, subRubroId, provinciaId, provinciaNombre, ciudadId, ciudadNombre, barrio, whatsapp, direccion, googleMapsUrl, websiteUrl, description, galeriaImagenes, renovacionAutomatica, id]);
         
         const result = await queryWithRetry('SELECT * FROM comercios WHERE id = $1', [id]);
         res.status(200).json(result.rows[0]);
@@ -419,7 +419,7 @@ app.post('/api/comercios/:id/opinar', async (req, res) => {
 
         const updateResult = await queryWithRetry(
             'UPDATE comercios SET opiniones = $1 WHERE id = $2 RETURNING *',
-            [JSON.stringify(opiniones), comercioId]
+            [opiniones, comercioId]
         );
 
         res.status(200).json(updateResult.rows[0]);
@@ -496,7 +496,7 @@ app.post('/api/public-register', async (req, res) => {
 
         await queryWithRetry(
             'INSERT INTO public_usuarios (id, nombre, apellido, email, password, whatsapp, favorites, history) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
-            [newUser.id, newUser.nombre, newUser.apellido, newUser.email, newUser.password, newUser.whatsapp, JSON.stringify(newUser.favorites), JSON.stringify(newUser.history)]
+            [newUser.id, newUser.nombre, newUser.apellido, newUser.email, newUser.password, newUser.whatsapp, newUser.favorites, newUser.history]
         );
         
         delete newUser.password; // Don't send password back
@@ -541,7 +541,7 @@ app.put('/api/public-users/:id', async (req, res) => {
     try {
         const result = await queryWithRetry(
             'UPDATE public_usuarios SET nombre = $1, apellido = $2, whatsapp = $3, favorites = $4, history = $5 WHERE id = $6 RETURNING *',
-            [nombre, apellido, whatsapp || null, JSON.stringify(favorites), JSON.stringify(history), id]
+            [nombre, apellido, whatsapp || null, favorites, history, id]
         );
 
         if (result.rows.length === 0) {
