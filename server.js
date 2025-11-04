@@ -21,7 +21,7 @@ app.use(express.json({ limit: '10mb' }));
 const AD_PRICES = { 1: 0, 2: 1500, 3: 3000, 4: 5000, 5: 8000, 6: 12000 };
 
 // --- FUNCIÓN DE REINTENTO PARA LA BASE DE DATOS ---
-const MAX_RETRIES = 5; // Aumentado para más resiliencia
+const MAX_RETRIES = 5; // Reintentos para queries durante la ejecución
 const RETRY_DELAY = 1000; // 1 segundo de base
 
 const queryWithRetry = async (queryText, params) => {
@@ -40,6 +40,29 @@ const queryWithRetry = async (queryText, params) => {
     }
   }
 };
+
+// --- FUNCIÓN DE REINTENTO PARA LA CONEXIÓN INICIAL ---
+const MAX_CONNECTION_RETRIES = 10; // Más reintentos para la conexión inicial
+const CONNECTION_RETRY_DELAY = 3000; // 3 segundos entre intentos
+
+const connectWithRetry = async () => {
+    for (let attempt = 1; attempt <= MAX_CONNECTION_RETRIES; attempt++) {
+        try {
+            await pool.query('SELECT NOW()'); // Intenta una query simple para conectar
+            console.log('Conexión con la base de datos PostgreSQL verificada.');
+            return; // Si tiene éxito, sale de la función
+        } catch (err) {
+            console.error(`Intento ${attempt} de conexión a la base de datos falló: ${err.message}`);
+            if (attempt === MAX_CONNECTION_RETRIES) {
+                console.error("Máximo de reintentos de conexión alcanzado. No se pudo conectar a la base de datos.");
+                throw err; // Lanza el error después del último intento
+            }
+            // Espera antes del próximo intento
+            await new Promise(res => setTimeout(res, CONNECTION_RETRY_DELAY));
+        }
+    }
+};
+
 
 // --- Inicialización de la Base de Datos ---
 const initializeDb = async () => {
@@ -535,11 +558,9 @@ app.put('/api/public-users/:id', async (req, res) => {
 // --- Iniciar Servidor ---
 const startServer = async () => {
   try {
-    // Hacemos una query simple para asegurar que la conexión con la DB está activa
-    // y que el servidor "despierte" si estaba dormido, antes de inicializar.
-    await pool.query('SELECT NOW()');
-    console.log('Conexión con la base de datos PostgreSQL verificada.');
-
+    // Usar la nueva función de conexión con reintentos.
+    await connectWithRetry();
+    
     // Inicializamos la DB y esperamos a que termine para evitar race conditions.
     await initializeDb();
     
