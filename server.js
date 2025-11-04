@@ -174,8 +174,8 @@ app.get('/api/data', async (req, res) => {
         pagos: pagosRes.rows,
     });
   } catch (err) {
-    console.error(err.stack);
-    res.status(500).json({ error: 'Error al obtener los datos de la base de datos' });
+    console.error('ERROR EN /api/data:', err.stack);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -190,7 +190,7 @@ app.post('/api/reset-data', async (req, res) => {
         res.status(200).json({ message: 'Datos restaurados con éxito.' });
     } catch (err) {
         await client.query('ROLLBACK');
-        console.error('Error al restaurar datos:', err.stack);
+        console.error('ERROR EN /api/reset-data:', err.stack);
         res.status(500).json({ error: 'No se pudieron restaurar los datos.' });
     } finally {
         client.release();
@@ -218,7 +218,7 @@ app.post('/api/register', async (req, res) => {
         res.status(201).json({ message: 'Registro exitoso.', email: newUser.email, verificationCode });
 
     } catch (err) {
-        console.error(err.stack);
+        console.error('ERROR EN /api/register:', err.stack);
         res.status(500).json({ error: 'Error interno del servidor.' });
     }
 });
@@ -241,7 +241,7 @@ app.post('/api/verify', async (req, res) => {
         res.status(200).json(user);
 
     } catch (err) {
-        console.error(err.stack);
+        console.error('ERROR EN /api/verify:', err.stack);
         res.status(500).json({ error: 'Error interno del servidor.' });
     }
 });
@@ -259,7 +259,7 @@ app.post('/api/login', async (req, res) => {
         res.status(200).json(user);
 
     } catch (err) {
-        console.error(err.stack);
+        console.error('ERROR EN /api/login:', err.stack);
         res.status(500).json({ error: 'Error interno del servidor.' });
     }
 });
@@ -275,7 +275,7 @@ app.put('/api/usuarios/:id', async (req, res) => {
         delete user.password;
         res.status(200).json(user);
     } catch (err) {
-        console.error(err.stack);
+        console.error(`ERROR EN /api/usuarios/${id}:`, err.stack);
         res.status(500).json({ error: 'Error al actualizar usuario.' });
     }
 });
@@ -298,7 +298,7 @@ app.post('/api/comercios', async (req, res) => {
             [newComercio.id, newComercio.nombre, newComercio.imagenUrl, newComercio.rubroId, newComercio.subRubroId, newComercio.provinciaId, newComercio.provinciaNombre, newComercio.ciudadId, newComercio.ciudadNombre, newComercio.barrio, newComercio.usuarioId, newComercio.whatsapp, newComercio.direccion, newComercio.googleMapsUrl, newComercio.websiteUrl, newComercio.description, JSON.stringify(newComercio.galeriaImagenes), newComercio.publicidad, newComercio.renovacionAutomatica, newComercio.vencimientoPublicidad, JSON.stringify(newComercio.calificaciones)]);
         res.status(201).json(newComercio);
     } catch (err) {
-        console.error(err.stack);
+        console.error('ERROR EN /api/comercios (POST):', err.stack);
         res.status(500).json({ error: 'Error al crear el comercio.' });
     }
 });
@@ -314,7 +314,7 @@ app.put('/api/comercios/:id', async (req, res) => {
         const result = await pool.query('SELECT * FROM comercios WHERE id = $1', [id]);
         res.status(200).json(result.rows[0]);
     } catch (err) {
-        console.error(err.stack);
+        console.error(`ERROR EN /api/comercios/${id} (PUT):`, err.stack);
         res.status(500).json({ error: 'Error al actualizar el comercio.' });
     }
 });
@@ -335,7 +335,7 @@ app.post('/api/comercios/:id/upgrade', async (req, res) => {
         res.status(200).json({ updatedComercio: result.rows[0], newPago });
 
     } catch (err) {
-        console.error(err.stack);
+        console.error(`ERROR EN /api/comercios/${id}/upgrade:`, err.stack);
         res.status(500).json({ error: 'Error al actualizar el plan.' });
     }
 });
@@ -358,7 +358,7 @@ app.post('/api/comercios/:id/calificar', async (req, res) => {
         res.status(200).json(updatedResult.rows[0]);
         
     } catch (err) {
-        console.error(err.stack);
+        console.error(`ERROR EN /api/comercios/${id}/calificar:`, err.stack);
         res.status(500).json({ error: 'Error al guardar la calificación.' });
     }
 });
@@ -371,7 +371,7 @@ app.delete('/api/comercios/:id', async (req, res) => {
         await pool.query('DELETE FROM comercios WHERE id = $1', [id]);
         res.status(200).json({ message: 'Comercio eliminado con éxito.' });
     } catch (err) {
-        console.error(err.stack);
+        console.error(`ERROR EN /api/comercios/${id} (DELETE):`, err.stack);
         res.status(500).json({ error: 'Error al eliminar el comercio.' });
     }
 });
@@ -410,7 +410,7 @@ app.post('/api/public-register', async (req, res) => {
         res.status(201).json(newUser);
 
     } catch (err) {
-        console.error(err.stack);
+        console.error('ERROR EN /api/public-register:', err.stack);
         res.status(500).json({ error: 'Error interno del servidor al registrar usuario público.' });
     }
 });
@@ -433,7 +433,7 @@ app.post('/api/public-login', async (req, res) => {
         res.status(200).json(user);
 
     } catch (err) {
-        console.error(err.stack);
+        console.error('ERROR EN /api/public-login:', err.stack);
         res.status(500).json({ error: 'Error interno del servidor al iniciar sesión.' });
     }
 });
@@ -459,7 +459,7 @@ app.put('/api/public-users/:id', async (req, res) => {
         delete updatedUser.password;
         res.status(200).json(updatedUser);
     } catch (err) {
-        console.error(err.stack);
+        console.error(`ERROR EN /api/public-users/${id}:`, err.stack);
         res.status(500).json({ error: 'Error al actualizar el usuario público.' });
     }
 });
