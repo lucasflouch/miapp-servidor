@@ -415,11 +415,11 @@ app.post('/api/comercios/:id/opinar', async (req, res) => {
             texto: texto || '', // El texto es opcional
             timestamp: new Date().toISOString(),
         };
-        opiniones.push(newOpinion);
+        const newOpiniones = [...opiniones, newOpinion];
 
         const updateResult = await queryWithRetry(
             'UPDATE comercios SET opiniones = $1 WHERE id = $2 RETURNING *',
-            [opiniones, comercioId]
+            [newOpiniones, comercioId]
         );
 
         res.status(200).json(updateResult.rows[0]);
