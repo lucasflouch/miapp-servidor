@@ -20,12 +20,33 @@ app.use(express.json({ limit: '10mb' }));
 
 const AD_PRICES = { 1: 0, 2: 1500, 3: 3000, 4: 5000, 5: 8000, 6: 12000 };
 
+// --- FUNCIÓN DE REINTENTO PARA LA BASE DE DATOS ---
+const MAX_RETRIES = 5; // Aumentado para más resiliencia
+const RETRY_DELAY = 1000; // 1 segundo de base
+
+const queryWithRetry = async (queryText, params) => {
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const result = await pool.query(queryText, params);
+      return result;
+    } catch (err) {
+      console.error(`Intento ${attempt} de la consulta falló. Error: ${err.message}`);
+      if (attempt === MAX_RETRIES) {
+        console.error("Máximo de reintentos alcanzado. Lanzando error.");
+        throw err; // Lanza el error después del último intento
+      }
+      // Esperar antes del próximo reintento con backoff exponencial
+      await new Promise(res => setTimeout(res, RETRY_DELAY * Math.pow(2, attempt -1)));
+    }
+  }
+};
+
 // --- Inicialización de la Base de Datos ---
 const initializeDb = async () => {
   try {
     console.log('Inicializando esquema de la base de datos si no existe...');
     // Usamos sintaxis de PostgreSQL (VARCHAR, TEXT, INTEGER, BOOLEAN, TIMESTAMP, JSONB para arrays)
-    await pool.query(`
+    await queryWithRetry(`
       CREATE TABLE IF NOT EXISTS usuarios (
         id TEXT PRIMARY KEY,
         nombre VARCHAR(255) NOT NULL,
@@ -37,7 +58,7 @@ const initializeDb = async () => {
       );
     `);
 
-    await pool.query(`
+    await queryWithRetry(`
       CREATE TABLE IF NOT EXISTS comercios (
         id TEXT PRIMARY KEY,
         nombre VARCHAR(255) NOT NULL,
@@ -60,11 +81,12 @@ const initializeDb = async () => {
         "renovacionAutomatica" BOOLEAN,
         "vencimientoPublicidad" TIMESTAMP,
         calificaciones JSONB,
+        comentarios JSONB,
         FOREIGN KEY ("usuarioId") REFERENCES usuarios(id) ON DELETE CASCADE
       );
     `);
     
-    await pool.query(`
+    await queryWithRetry(`
       CREATE TABLE IF NOT EXISTS banners (
           id TEXT PRIMARY KEY,
           "comercioId" TEXT,
@@ -74,7 +96,7 @@ const initializeDb = async () => {
       );
     `);
 
-    await pool.query(`
+    await queryWithRetry(`
       CREATE TABLE IF NOT EXISTS pagos (
           id TEXT PRIMARY KEY,
           "comercioId" TEXT,
@@ -85,7 +107,7 @@ const initializeDb = async () => {
       );
     `);
     
-    await pool.query(`
+    await queryWithRetry(`
       CREATE TABLE IF NOT EXISTS public_usuarios (
         id TEXT PRIMARY KEY,
         nombre VARCHAR(255) NOT NULL,
@@ -97,8 +119,19 @@ const initializeDb = async () => {
         history JSONB
       );
     `);
+    
+     await queryWithRetry(`
+      CREATE TABLE IF NOT EXISTS reportes (
+        id TEXT PRIMARY KEY,
+        "comercioId" TEXT NOT NULL,
+        motivo VARCHAR(255) NOT NULL,
+        detalles TEXT,
+        "usuarioId" TEXT,
+        timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
 
-    const res = await pool.query('SELECT COUNT(id) as count FROM usuarios');
+    const res = await queryWithRetry('SELECT COUNT(id) as count FROM usuarios');
     if (res.rows[0].count === '0') {
       console.log('Base de datos vacía. Poblando con datos iniciales...');
       await populateDatabase();
@@ -122,7 +155,7 @@ const populateDatabase = async () => {
             await client.query('INSERT INTO usuarios (id, nombre, email, password, telefono, "isVerified") VALUES ($1, $2, $3, $4, $5, $6)', [u.id, u.nombre, u.email, u.password, u.telefono, true]);
         }
         for (const c of data.comercios) {
-            await client.query('INSERT INTO comercios (id, nombre, "imagenUrl", "rubroId", "subRubroId", "provinciaId", "provinciaNombre", "ciudadId", "ciudadNombre", barrio, "usuarioId", whatsapp, direccion, "googleMapsUrl", "websiteUrl", description, "galeriaImagenes", publicidad, "renovacionAutomatica", "vencimientoPublicidad", calificaciones) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)', [c.id, c.nombre, c.imagenUrl, c.rubroId, c.subRubroId, c.provinciaId, c.provinciaNombre, c.ciudadId, c.ciudadNombre, c.barrio, c.usuarioId, c.whatsapp, c.direccion, c.googleMapsUrl, c.websiteUrl, c.description, JSON.stringify(c.galeriaImagenes), c.publicidad, c.renovacionAutomatica, c.vencimientoPublicidad, JSON.stringify(c.calificaciones)]);
+            await client.query('INSERT INTO comercios (id, nombre, "imagenUrl", "rubroId", "subRubroId", "provinciaId", "provinciaNombre", "ciudadId", "ciudadNombre", barrio, "usuarioId", whatsapp, direccion, "googleMapsUrl", "websiteUrl", description, "galeriaImagenes", publicidad, "renovacionAutomatica", "vencimientoPublicidad", calificaciones, comentarios) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)', [c.id, c.nombre, c.imagenUrl, c.rubroId, c.subRubroId, c.provinciaId, c.provinciaNombre, c.ciudadId, c.ciudadNombre, c.barrio, c.usuarioId, c.whatsapp, c.direccion, c.googleMapsUrl, c.websiteUrl, c.description, JSON.stringify(c.galeriaImagenes), c.publicidad, c.renovacionAutomatica, c.vencimientoPublicidad, JSON.stringify(c.calificaciones), JSON.stringify(c.comentarios || [])]);
         }
         for (const b of data.banners) {
             await client.query('INSERT INTO banners (id, "comercioId", "imagenUrl", "venceEl") VALUES ($1, $2, $3, $4)', [b.id, b.comercioId, b.imagenUrl, b.venceEl]);
@@ -154,10 +187,10 @@ app.get('/api/data', async (req, res) => {
     };
 
     const [usuariosRes, comerciosRes, bannersRes, pagosRes] = await Promise.all([
-        pool.query('SELECT * FROM usuarios'),
-        pool.query('SELECT * FROM comercios'),
-        pool.query('SELECT * FROM banners'),
-        pool.query('SELECT * FROM pagos')
+        queryWithRetry('SELECT * FROM usuarios'),
+        queryWithRetry('SELECT * FROM comercios'),
+        queryWithRetry('SELECT * FROM banners'),
+        queryWithRetry('SELECT * FROM pagos')
     ]);
 
     res.json({
@@ -177,7 +210,7 @@ app.post('/api/reset-data', async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        await client.query('TRUNCATE usuarios, comercios, banners, pagos, public_usuarios RESTART IDENTITY CASCADE');
+        await client.query('TRUNCATE usuarios, comercios, banners, pagos, public_usuarios, reportes RESTART IDENTITY CASCADE');
         await client.query('COMMIT');
         console.log("Datos de la DB borrados. Repoblando...");
         await populateDatabase(); // Re-poblar la base
@@ -197,7 +230,7 @@ app.post('/api/register', async (req, res) => {
     if (!nombre || !email || !password) return res.status(400).json({ error: 'Faltan datos.' });
 
     try {
-        const existingUser = await pool.query('SELECT email FROM usuarios WHERE email = $1', [email]);
+        const existingUser = await queryWithRetry('SELECT email FROM usuarios WHERE email = $1', [email]);
         if (existingUser.rows.length > 0) {
             return res.status(409).json({ error: 'El email ya está registrado.' });
         }
@@ -205,7 +238,7 @@ app.post('/api/register', async (req, res) => {
         const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
         const newUser = { id: uuidv4(), nombre, email, password, telefono: telefono || null, verificationCode };
 
-        await pool.query('INSERT INTO usuarios (id, nombre, email, password, telefono, "verificationCode") VALUES ($1, $2, $3, $4, $5, $6)',
+        await queryWithRetry('INSERT INTO usuarios (id, nombre, email, password, telefono, "verificationCode") VALUES ($1, $2, $3, $4, $5, $6)',
             [newUser.id, newUser.nombre, newUser.email, newUser.password, newUser.telefono, newUser.verificationCode]);
 
         console.log(`Usuario registrado: ${email}, Código: ${verificationCode}`);
@@ -220,14 +253,14 @@ app.post('/api/register', async (req, res) => {
 app.post('/api/verify', async (req, res) => {
     const { email, code } = req.body;
     try {
-        const result = await pool.query('SELECT * FROM usuarios WHERE email = $1', [email]);
+        const result = await queryWithRetry('SELECT * FROM usuarios WHERE email = $1', [email]);
         const user = result.rows[0];
         
         if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
         if (user.isVerified) return res.status(400).json({ error: 'El usuario ya está verificado.' });
         if (user.verificationCode !== code) return res.status(400).json({ error: 'Código de verificación incorrecto.' });
 
-        await pool.query('UPDATE usuarios SET "isVerified" = true, "verificationCode" = NULL WHERE id = $1', [user.id]);
+        await queryWithRetry('UPDATE usuarios SET "isVerified" = true, "verificationCode" = NULL WHERE id = $1', [user.id]);
         
         delete user.password;
         delete user.verificationCode;
@@ -243,7 +276,7 @@ app.post('/api/verify', async (req, res) => {
 app.post('/api/login', async (req, res) => {
     const { email, password: inputPassword } = req.body;
     try {
-        const result = await pool.query('SELECT * FROM usuarios WHERE email = $1', [email]);
+        const result = await queryWithRetry('SELECT * FROM usuarios WHERE email = $1', [email]);
         const user = result.rows[0];
 
         if (!user || user.password !== inputPassword) return res.status(401).json({ error: 'Email o contraseña incorrectos.' });
@@ -263,8 +296,8 @@ app.put('/api/usuarios/:id', async (req, res) => {
     const { id } = req.params;
     const { nombre, telefono } = req.body;
     try {
-        await pool.query('UPDATE usuarios SET nombre = $1, telefono = $2 WHERE id = $3', [nombre, telefono, id]);
-        const result = await pool.query('SELECT * FROM usuarios WHERE id = $1', [id]);
+        await queryWithRetry('UPDATE usuarios SET nombre = $1, telefono = $2 WHERE id = $3', [nombre, telefono, id]);
+        const result = await queryWithRetry('SELECT * FROM usuarios WHERE id = $1', [id]);
         const user = result.rows[0];
         delete user.password;
         res.status(200).json(user);
@@ -285,11 +318,12 @@ app.post('/api/comercios', async (req, res) => {
         renovacionAutomatica: data.publicidad > 1 ? data.renovacionAutomatica : false,
         vencimientoPublicidad: vencimiento,
         calificaciones: [],
+        comentarios: [],
     };
     
     try {
-        await pool.query('INSERT INTO comercios (id, nombre, "imagenUrl", "rubroId", "subRubroId", "provinciaId", "provinciaNombre", "ciudadId", "ciudadNombre", barrio, "usuarioId", whatsapp, direccion, "googleMapsUrl", "websiteUrl", description, "galeriaImagenes", publicidad, "renovacionAutomatica", "vencimientoPublicidad", calificaciones) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)',
-            [newComercio.id, newComercio.nombre, newComercio.imagenUrl, newComercio.rubroId, newComercio.subRubroId, newComercio.provinciaId, newComercio.provinciaNombre, newComercio.ciudadId, newComercio.ciudadNombre, newComercio.barrio, newComercio.usuarioId, newComercio.whatsapp, newComercio.direccion, newComercio.googleMapsUrl, newComercio.websiteUrl, newComercio.description, JSON.stringify(newComercio.galeriaImagenes), newComercio.publicidad, newComercio.renovacionAutomatica, newComercio.vencimientoPublicidad, JSON.stringify(newComercio.calificaciones)]);
+        await queryWithRetry('INSERT INTO comercios (id, nombre, "imagenUrl", "rubroId", "subRubroId", "provinciaId", "provinciaNombre", "ciudadId", "ciudadNombre", barrio, "usuarioId", whatsapp, direccion, "googleMapsUrl", "websiteUrl", description, "galeriaImagenes", publicidad, "renovacionAutomatica", "vencimientoPublicidad", calificaciones, comentarios) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)',
+            [newComercio.id, newComercio.nombre, newComercio.imagenUrl, newComercio.rubroId, newComercio.subRubroId, newComercio.provinciaId, newComercio.provinciaNombre, newComercio.ciudadId, newComercio.ciudadNombre, newComercio.barrio, newComercio.usuarioId, newComercio.whatsapp, newComercio.direccion, newComercio.googleMapsUrl, newComercio.websiteUrl, newComercio.description, JSON.stringify(newComercio.galeriaImagenes), newComercio.publicidad, newComercio.renovacionAutomatica, newComercio.vencimientoPublicidad, JSON.stringify(newComercio.calificaciones), JSON.stringify(newComercio.comentarios)]);
         res.status(201).json(newComercio);
     } catch (err) {
         console.error('ERROR EN /api/comercios (POST):', err.stack);
@@ -302,10 +336,10 @@ app.put('/api/comercios/:id', async (req, res) => {
     const { id } = req.params;
     const { nombre, imagenUrl, rubroId, subRubroId, provinciaId, provinciaNombre, ciudadId, ciudadNombre, barrio, whatsapp, direccion, googleMapsUrl, websiteUrl, description, galeriaImagenes, renovacionAutomatica } = req.body;
     try {
-        await pool.query('UPDATE comercios SET nombre=$1, "imagenUrl"=$2, "rubroId"=$3, "subRubroId"=$4, "provinciaId"=$5, "provinciaNombre"=$6, "ciudadId"=$7, "ciudadNombre"=$8, barrio=$9, whatsapp=$10, direccion=$11, "googleMapsUrl"=$12, "websiteUrl"=$13, description=$14, "galeriaImagenes"=$15, "renovacionAutomatica"=$16 WHERE id = $17',
+        await queryWithRetry('UPDATE comercios SET nombre=$1, "imagenUrl"=$2, "rubroId"=$3, "subRubroId"=$4, "provinciaId"=$5, "provinciaNombre"=$6, "ciudadId"=$7, "ciudadNombre"=$8, barrio=$9, whatsapp=$10, direccion=$11, "googleMapsUrl"=$12, "websiteUrl"=$13, description=$14, "galeriaImagenes"=$15, "renovacionAutomatica"=$16 WHERE id = $17',
             [nombre, imagenUrl, rubroId, subRubroId, provinciaId, provinciaNombre, ciudadId, ciudadNombre, barrio, whatsapp, direccion, googleMapsUrl, websiteUrl, description, JSON.stringify(galeriaImagenes), renovacionAutomatica, id]);
         
-        const result = await pool.query('SELECT * FROM comercios WHERE id = $1', [id]);
+        const result = await queryWithRetry('SELECT * FROM comercios WHERE id = $1', [id]);
         res.status(200).json(result.rows[0]);
     } catch (err) {
         console.error(`ERROR EN /api/comercios/${id} (PUT):`, err.stack);
@@ -319,13 +353,13 @@ app.post('/api/comercios/:id/upgrade', async (req, res) => {
     const vencimiento = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
     try {
-        await pool.query('UPDATE comercios SET publicidad = $1, "vencimientoPublicidad" = $2 WHERE id = $3', [newLevel, vencimiento, id]);
+        await queryWithRetry('UPDATE comercios SET publicidad = $1, "vencimientoPublicidad" = $2 WHERE id = $3', [newLevel, vencimiento, id]);
         
         const newPago = { id: `pay-${uuidv4()}`, comercioId: id, monto: AD_PRICES[newLevel], fecha: new Date(), mercadoPagoId: `mp-test-${Date.now()}`};
-        await pool.query('INSERT INTO pagos (id, "comercioId", monto, fecha, "mercadoPagoId") VALUES ($1,$2,$3,$4,$5)',
+        await queryWithRetry('INSERT INTO pagos (id, "comercioId", monto, fecha, "mercadoPagoId") VALUES ($1,$2,$3,$4,$5)',
             [newPago.id, newPago.comercioId, newPago.monto, newPago.fecha, newPago.mercadoPagoId]);
 
-        const result = await pool.query('SELECT * FROM comercios WHERE id = $1', [id]);
+        const result = await queryWithRetry('SELECT * FROM comercios WHERE id = $1', [id]);
         res.status(200).json({ updatedComercio: result.rows[0], newPago });
 
     } catch (err) {
@@ -340,15 +374,15 @@ app.post('/api/comercios/:id/calificar', async (req, res) => {
     if (typeof rating !== 'number' || rating < 1 || rating > 5) return res.status(400).json({ error: 'Calificación inválida.' });
 
     try {
-        const result = await pool.query('SELECT calificaciones FROM comercios WHERE id = $1', [id]);
+        const result = await queryWithRetry('SELECT calificaciones FROM comercios WHERE id = $1', [id]);
         if (result.rows.length === 0) return res.status(404).json({ error: 'Comercio no encontrado.' });
 
         const calificaciones = result.rows[0].calificaciones || [];
         calificaciones.push(rating);
         
-        await pool.query('UPDATE comercios SET calificaciones = $1 WHERE id = $2', [JSON.stringify(calificaciones), id]);
+        await queryWithRetry('UPDATE comercios SET calificaciones = $1 WHERE id = $2', [JSON.stringify(calificaciones), id]);
         
-        const updatedResult = await pool.query('SELECT * FROM comercios WHERE id = $1', [id]);
+        const updatedResult = await queryWithRetry('SELECT * FROM comercios WHERE id = $1', [id]);
         res.status(200).json(updatedResult.rows[0]);
         
     } catch (err) {
@@ -357,12 +391,74 @@ app.post('/api/comercios/:id/calificar', async (req, res) => {
     }
 });
 
+app.post('/api/comercios/:id/comentar', async (req, res) => {
+    const { id: comercioId } = req.params;
+    const { usuarioId, usuarioNombre, texto } = req.body;
+
+    if (!usuarioId || !usuarioNombre || !texto) {
+        return res.status(400).json({ error: 'Faltan datos para el comentario.' });
+    }
+
+    try {
+        const result = await queryWithRetry('SELECT comentarios FROM comercios WHERE id = $1', [comercioId]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Comercio no encontrado.' });
+        }
+
+        const comentarios = result.rows[0].comentarios || [];
+        const newComentario = {
+            id: `comm-${uuidv4()}`,
+            usuarioId,
+            usuarioNombre,
+            texto,
+            timestamp: new Date().toISOString(),
+        };
+        comentarios.push(newComentario);
+
+        const updateResult = await queryWithRetry(
+            'UPDATE comercios SET comentarios = $1 WHERE id = $2 RETURNING *',
+            [JSON.stringify(comentarios), comercioId]
+        );
+
+        res.status(200).json(updateResult.rows[0]);
+
+    } catch (err) {
+        console.error(`ERROR EN /api/comercios/${comercioId}/comentar:`, err.stack);
+        res.status(500).json({ error: 'Error al guardar el comentario.' });
+    }
+});
+
+app.post('/api/reportes', async (req, res) => {
+    const { comercioId, motivo, detalles, usuarioId } = req.body;
+    if (!comercioId || !motivo) {
+        return res.status(400).json({ error: 'Faltan datos para el reporte.' });
+    }
+
+    try {
+        const newReporte = {
+            id: `rep-${uuidv4()}`,
+            comercioId,
+            motivo,
+            detalles: detalles || null,
+            usuarioId: usuarioId || null,
+        };
+        await queryWithRetry(
+            'INSERT INTO reportes (id, "comercioId", motivo, detalles, "usuarioId") VALUES ($1, $2, $3, $4, $5)',
+            [newReporte.id, newReporte.comercioId, newReporte.motivo, newReporte.detalles, newReporte.usuarioId]
+        );
+        res.status(201).json({ message: 'Reporte enviado con éxito.' });
+    } catch (err) {
+        console.error(`ERROR EN /api/reportes:`, err.stack);
+        res.status(500).json({ error: 'Error al enviar el reporte.' });
+    }
+});
+
 
 app.delete('/api/comercios/:id', async (req, res) => {
     const { id } = req.params;
     try {
         // La restricción ON DELETE CASCADE en la DB se encarga de borrar banners y pagos.
-        await pool.query('DELETE FROM comercios WHERE id = $1', [id]);
+        await queryWithRetry('DELETE FROM comercios WHERE id = $1', [id]);
         res.status(200).json({ message: 'Comercio eliminado con éxito.' });
     } catch (err) {
         console.error(`ERROR EN /api/comercios/${id} (DELETE):`, err.stack);
@@ -379,7 +475,7 @@ app.post('/api/public-register', async (req, res) => {
     }
 
     try {
-        const existingUser = await pool.query('SELECT email FROM public_usuarios WHERE email = $1', [email]);
+        const existingUser = await queryWithRetry('SELECT email FROM public_usuarios WHERE email = $1', [email]);
         if (existingUser.rows.length > 0) {
             return res.status(409).json({ error: 'El email ya está registrado.' });
         }
@@ -395,7 +491,7 @@ app.post('/api/public-register', async (req, res) => {
             history: [],
         };
 
-        await pool.query(
+        await queryWithRetry(
             'INSERT INTO public_usuarios (id, nombre, apellido, email, password, whatsapp, favorites, history) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
             [newUser.id, newUser.nombre, newUser.apellido, newUser.email, newUser.password, newUser.whatsapp, JSON.stringify(newUser.favorites), JSON.stringify(newUser.history)]
         );
@@ -416,7 +512,7 @@ app.post('/api/public-login', async (req, res) => {
     }
 
     try {
-        const result = await pool.query('SELECT * FROM public_usuarios WHERE email = $1', [email]);
+        const result = await queryWithRetry('SELECT * FROM public_usuarios WHERE email = $1', [email]);
         const user = result.rows[0];
 
         if (!user || user.password !== inputPassword) {
@@ -440,7 +536,7 @@ app.put('/api/public-users/:id', async (req, res) => {
     }
 
     try {
-        const result = await pool.query(
+        const result = await queryWithRetry(
             'UPDATE public_usuarios SET nombre = $1, apellido = $2, whatsapp = $3, favorites = $4, history = $5 WHERE id = $6 RETURNING *',
             [nombre, apellido, whatsapp || null, JSON.stringify(favorites), JSON.stringify(history), id]
         );
