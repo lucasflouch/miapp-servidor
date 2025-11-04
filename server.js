@@ -41,24 +41,27 @@ const queryWithRetry = async (queryText, params) => {
   }
 };
 
-// --- FUNCIÓN DE REINTENTO PARA LA CONEXIÓN INICIAL ---
-const MAX_CONNECTION_RETRIES = 10; // Más reintentos para la conexión inicial
-const CONNECTION_RETRY_DELAY = 3000; // 3 segundos entre intentos
+// --- FUNCIÓN DE REINTENTO PARA LA CONEXIÓN INICIAL (MÁS ROBUSTA) ---
+const MAX_CONNECTION_RETRIES = 10;
+const INITIAL_CONNECTION_RETRY_DELAY = 1000; // Empezar con 1 segundo
 
 const connectWithRetry = async () => {
     for (let attempt = 1; attempt <= MAX_CONNECTION_RETRIES; attempt++) {
         try {
-            await pool.query('SELECT NOW()'); // Intenta una query simple para conectar
+            await pool.query('SELECT NOW()'); // Intenta una query simple para verificar la conexión
             console.log('Conexión con la base de datos PostgreSQL verificada.');
             return; // Si tiene éxito, sale de la función
         } catch (err) {
+            const delay = INITIAL_CONNECTION_RETRY_DELAY * Math.pow(2, attempt - 1); // Backoff exponencial
             console.error(`Intento ${attempt} de conexión a la base de datos falló: ${err.message}`);
+            
             if (attempt === MAX_CONNECTION_RETRIES) {
                 console.error("Máximo de reintentos de conexión alcanzado. No se pudo conectar a la base de datos.");
                 throw err; // Lanza el error después del último intento
             }
-            // Espera antes del próximo intento
-            await new Promise(res => setTimeout(res, CONNECTION_RETRY_DELAY));
+
+            console.log(`Reintentando conexión en ${delay / 1000} segundos...`);
+            await new Promise(res => setTimeout(res, delay));
         }
     }
 };
