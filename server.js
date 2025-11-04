@@ -180,12 +180,12 @@ app.get('/api/data', async (req, res) => {
 });
 
 app.post('/api/reset-data', async (req, res) => {
-    console.log("Restaurando datos iniciales...");
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
         await client.query('TRUNCATE usuarios, comercios, banners, pagos, public_usuarios RESTART IDENTITY CASCADE');
         await client.query('COMMIT');
+        console.log("Datos de la DB borrados. Repoblando...");
         await populateDatabase(); // Re-poblar la base
         res.status(200).json({ message: 'Datos restaurados con éxito.' });
     } catch (err) {
