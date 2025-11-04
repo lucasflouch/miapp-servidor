@@ -80,8 +80,7 @@ const initializeDb = async () => {
         publicidad INTEGER,
         "renovacionAutomatica" BOOLEAN,
         "vencimientoPublicidad" TIMESTAMP,
-        calificaciones JSONB,
-        comentarios JSONB,
+        opiniones JSONB,
         FOREIGN KEY ("usuarioId") REFERENCES usuarios(id) ON DELETE CASCADE
       );
     `);
@@ -155,7 +154,7 @@ const populateDatabase = async () => {
             await client.query('INSERT INTO usuarios (id, nombre, email, password, telefono, "isVerified") VALUES ($1, $2, $3, $4, $5, $6)', [u.id, u.nombre, u.email, u.password, u.telefono, true]);
         }
         for (const c of data.comercios) {
-            await client.query('INSERT INTO comercios (id, nombre, "imagenUrl", "rubroId", "subRubroId", "provinciaId", "provinciaNombre", "ciudadId", "ciudadNombre", barrio, "usuarioId", whatsapp, direccion, "googleMapsUrl", "websiteUrl", description, "galeriaImagenes", publicidad, "renovacionAutomatica", "vencimientoPublicidad", calificaciones, comentarios) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)', [c.id, c.nombre, c.imagenUrl, c.rubroId, c.subRubroId, c.provinciaId, c.provinciaNombre, c.ciudadId, c.ciudadNombre, c.barrio, c.usuarioId, c.whatsapp, c.direccion, c.googleMapsUrl, c.websiteUrl, c.description, JSON.stringify(c.galeriaImagenes), c.publicidad, c.renovacionAutomatica, c.vencimientoPublicidad, JSON.stringify(c.calificaciones), JSON.stringify(c.comentarios || [])]);
+            await client.query('INSERT INTO comercios (id, nombre, "imagenUrl", "rubroId", "subRubroId", "provinciaId", "provinciaNombre", "ciudadId", "ciudadNombre", barrio, "usuarioId", whatsapp, direccion, "googleMapsUrl", "websiteUrl", description, "galeriaImagenes", publicidad, "renovacionAutomatica", "vencimientoPublicidad", opiniones) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)', [c.id, c.nombre, c.imagenUrl, c.rubroId, c.subRubroId, c.provinciaId, c.provinciaNombre, c.ciudadId, c.ciudadNombre, c.barrio, c.usuarioId, c.whatsapp, c.direccion, c.googleMapsUrl, c.websiteUrl, c.description, JSON.stringify(c.galeriaImagenes), c.publicidad, c.renovacionAutomatica, c.vencimientoPublicidad, JSON.stringify(c.opiniones || [])]);
         }
         for (const b of data.banners) {
             await client.query('INSERT INTO banners (id, "comercioId", "imagenUrl", "venceEl") VALUES ($1, $2, $3, $4)', [b.id, b.comercioId, b.imagenUrl, b.venceEl]);
@@ -317,13 +316,12 @@ app.post('/api/comercios', async (req, res) => {
         publicidad: data.publicidad || 1,
         renovacionAutomatica: data.publicidad > 1 ? data.renovacionAutomatica : false,
         vencimientoPublicidad: vencimiento,
-        calificaciones: [],
-        comentarios: [],
+        opiniones: [],
     };
     
     try {
-        await queryWithRetry('INSERT INTO comercios (id, nombre, "imagenUrl", "rubroId", "subRubroId", "provinciaId", "provinciaNombre", "ciudadId", "ciudadNombre", barrio, "usuarioId", whatsapp, direccion, "googleMapsUrl", "websiteUrl", description, "galeriaImagenes", publicidad, "renovacionAutomatica", "vencimientoPublicidad", calificaciones, comentarios) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)',
-            [newComercio.id, newComercio.nombre, newComercio.imagenUrl, newComercio.rubroId, newComercio.subRubroId, newComercio.provinciaId, newComercio.provinciaNombre, newComercio.ciudadId, newComercio.ciudadNombre, newComercio.barrio, newComercio.usuarioId, newComercio.whatsapp, newComercio.direccion, newComercio.googleMapsUrl, newComercio.websiteUrl, newComercio.description, JSON.stringify(newComercio.galeriaImagenes), newComercio.publicidad, newComercio.renovacionAutomatica, newComercio.vencimientoPublicidad, JSON.stringify(newComercio.calificaciones), JSON.stringify(newComercio.comentarios)]);
+        await queryWithRetry('INSERT INTO comercios (id, nombre, "imagenUrl", "rubroId", "subRubroId", "provinciaId", "provinciaNombre", "ciudadId", "ciudadNombre", barrio, "usuarioId", whatsapp, direccion, "googleMapsUrl", "websiteUrl", description, "galeriaImagenes", publicidad, "renovacionAutomatica", "vencimientoPublicidad", opiniones) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)',
+            [newComercio.id, newComercio.nombre, newComercio.imagenUrl, newComercio.rubroId, newComercio.subRubroId, newComercio.provinciaId, newComercio.provinciaNombre, newComercio.ciudadId, newComercio.ciudadNombre, newComercio.barrio, newComercio.usuarioId, newComercio.whatsapp, newComercio.direccion, newComercio.googleMapsUrl, newComercio.websiteUrl, newComercio.description, JSON.stringify(newComercio.galeriaImagenes), newComercio.publicidad, newComercio.renovacionAutomatica, newComercio.vencimientoPublicidad, JSON.stringify(newComercio.opiniones)]);
         res.status(201).json(newComercio);
     } catch (err) {
         console.error('ERROR EN /api/comercios (POST):', err.stack);
@@ -368,65 +366,44 @@ app.post('/api/comercios/:id/upgrade', async (req, res) => {
     }
 });
 
-app.post('/api/comercios/:id/calificar', async (req, res) => {
-    const { id } = req.params;
-    const { rating } = req.body;
-    if (typeof rating !== 'number' || rating < 1 || rating > 5) return res.status(400).json({ error: 'Calificación inválida.' });
-
-    try {
-        const result = await queryWithRetry('SELECT calificaciones FROM comercios WHERE id = $1', [id]);
-        if (result.rows.length === 0) return res.status(404).json({ error: 'Comercio no encontrado.' });
-
-        const calificaciones = result.rows[0].calificaciones || [];
-        calificaciones.push(rating);
-        
-        await queryWithRetry('UPDATE comercios SET calificaciones = $1 WHERE id = $2', [JSON.stringify(calificaciones), id]);
-        
-        const updatedResult = await queryWithRetry('SELECT * FROM comercios WHERE id = $1', [id]);
-        res.status(200).json(updatedResult.rows[0]);
-        
-    } catch (err) {
-        console.error(`ERROR EN /api/comercios/${id}/calificar:`, err.stack);
-        res.status(500).json({ error: 'Error al guardar la calificación.' });
-    }
-});
-
-app.post('/api/comercios/:id/comentar', async (req, res) => {
+app.post('/api/comercios/:id/opinar', async (req, res) => {
     const { id: comercioId } = req.params;
-    const { usuarioId, usuarioNombre, texto } = req.body;
+    const { usuarioId, usuarioNombre, texto, rating } = req.body;
 
-    if (!usuarioId || !usuarioNombre || !texto) {
-        return res.status(400).json({ error: 'Faltan datos para el comentario.' });
+    if (!usuarioId || !usuarioNombre || !rating || typeof rating !== 'number' || rating < 1 || rating > 5) {
+        return res.status(400).json({ error: 'Faltan datos o son incorrectos para la opinión.' });
     }
 
     try {
-        const result = await queryWithRetry('SELECT comentarios FROM comercios WHERE id = $1', [comercioId]);
+        const result = await queryWithRetry('SELECT opiniones FROM comercios WHERE id = $1', [comercioId]);
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Comercio no encontrado.' });
         }
 
-        const comentarios = result.rows[0].comentarios || [];
-        const newComentario = {
-            id: `comm-${uuidv4()}`,
+        const opiniones = result.rows[0].opiniones || [];
+        const newOpinion = {
+            id: `op-${uuidv4()}`,
             usuarioId,
             usuarioNombre,
-            texto,
+            rating,
+            texto: texto || '', // El texto es opcional
             timestamp: new Date().toISOString(),
         };
-        comentarios.push(newComentario);
+        opiniones.push(newOpinion);
 
         const updateResult = await queryWithRetry(
-            'UPDATE comercios SET comentarios = $1 WHERE id = $2 RETURNING *',
-            [JSON.stringify(comentarios), comercioId]
+            'UPDATE comercios SET opiniones = $1 WHERE id = $2 RETURNING *',
+            [JSON.stringify(opiniones), comercioId]
         );
 
         res.status(200).json(updateResult.rows[0]);
 
     } catch (err) {
-        console.error(`ERROR EN /api/comercios/${comercioId}/comentar:`, err.stack);
-        res.status(500).json({ error: 'Error al guardar el comentario.' });
+        console.error(`ERROR EN /api/comercios/${comercioId}/opinar:`, err.stack);
+        res.status(500).json({ error: 'Error al guardar la opinión.' });
     }
 });
+
 
 app.post('/api/reportes', async (req, res) => {
     const { comercioId, motivo, detalles, usuarioId } = req.body;
