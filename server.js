@@ -105,9 +105,7 @@ const initializeDb = async () => {
         "galeriaImagenes" JSONB,
         publicidad INTEGER,
         "renovacionAutomatica" BOOLEAN,
-        "vencimientoPublicidad" TIMESTAMP,
-        opiniones JSONB,
-        FOREIGN KEY ("usuarioId") REFERENCES usuarios(id) ON DELETE CASCADE
+        "vencimientoPublicidad" TIMESTAMP
       );
     `);
     
@@ -155,6 +153,25 @@ const initializeDb = async () => {
         timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
     `);
+
+    console.log('Verificando y aplicando migraciones de esquema necesarias...');
+    try {
+        // MIGRACIÓN: Asegurarse de que la columna 'opiniones' exista en 'comercios'
+        const checkOpinionesColumn = await queryWithRetry(`
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'comercios' AND column_name = 'opiniones'
+        `);
+        if (checkOpinionesColumn.rows.length === 0) {
+            console.log("MIGRACIÓN: La columna 'opiniones' no existe en la tabla 'comercios'. Añadiéndola...");
+            await queryWithRetry(`ALTER TABLE comercios ADD COLUMN opiniones JSONB DEFAULT '[]'`);
+            console.log("MIGRACIÓN: Columna 'opiniones' añadida con éxito.");
+        }
+    } catch (migrationError) {
+        console.error("FALLO CRÍTICO DURANTE MIGRACIÓN DE ESQUEMA:", migrationError.stack);
+        throw migrationError; // Lanzar el error para detener el arranque del servidor.
+    }
+    console.log('Verificación de esquema completada.');
+
 
     const res = await queryWithRetry('SELECT COUNT(id) as count FROM usuarios');
     if (res.rows[0].count === '0') {
@@ -343,7 +360,7 @@ app.post('/api/comercios', async (req, res) => {
         publicidad: data.publicidad || 1,
         renovacionAutomatica: data.publicidad > 1 ? data.renovacionAutomatica : false,
         vencimientoPublicidad: vencimiento,
-        opiniones: [],
+        opiniones: data.opiniones || [],
     };
     
     try {
