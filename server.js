@@ -184,14 +184,25 @@ const initializeDb = async () => {
     }
     console.log('Verificación de esquema completada.');
 
-
+    // --- LÓGICA MEJORADA ---
+    // Primero, comprobar si la base de datos está completamente vacía.
     const res = await queryWithRetry('SELECT COUNT(id) as count FROM usuarios');
     if (res.rows[0].count === '0') {
       console.log('Base de datos vacía. Poblando con datos iniciales...');
       await populateDatabase();
     } else {
       console.log('La base de datos ya contiene datos.');
+      // Si ya hay datos, nos aseguramos de que el admin exista.
+      const adminCheck = await queryWithRetry('SELECT id FROM usuarios WHERE email = $1', [ADMIN_EMAIL]);
+      if (adminCheck.rows.length === 0) {
+          console.log('El usuario administrador no existe. Creándolo ahora...');
+          await queryWithRetry('INSERT INTO usuarios (id, nombre, email, password, "isVerified") VALUES ($1, $2, $3, $4, $5)', [uuidv4(), 'Administrador', ADMIN_EMAIL, 'admin123', true]);
+          console.log('Usuario administrador creado con éxito.');
+      } else {
+          console.log('El usuario administrador ya existe.');
+      }
     }
+
   } catch (err) {
     console.error('Error al inicializar la base de datos:', err.stack);
     // Lanzamos el error para que el proceso de arranque principal lo capture y se detenga.
