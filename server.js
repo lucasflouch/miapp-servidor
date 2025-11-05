@@ -19,6 +19,7 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 const AD_PRICES = { 1: 0, 2: 1500, 3: 3000, 4: 5000, 5: 8000, 6: 12000 };
+const ADMIN_EMAIL = 'admin@guiacomercial.com'; // Email del administrador
 
 // --- FUNCIÓN DE REINTENTO PARA LA BASE DE DATOS ---
 const MAX_RETRIES = 5; // Reintentos para queries durante la ejecución
@@ -154,6 +155,17 @@ const initializeDb = async () => {
       );
     `);
 
+    await queryWithRetry(`
+      CREATE TABLE IF NOT EXISTS analytics_events (
+        id TEXT PRIMARY KEY,
+        "comercioId" TEXT NOT NULL,
+        "rubroId" TEXT,
+        "usuarioId" TEXT,
+        "eventType" VARCHAR(50) NOT NULL,
+        timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
     console.log('Verificando y aplicando migraciones de esquema necesarias...');
     try {
         // MIGRACIÓN: Asegurarse de que la columna 'opiniones' exista en 'comercios'
@@ -192,6 +204,9 @@ const populateDatabase = async () => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN'); // Iniciar transacción
+
+        // Crear usuario admin
+        await client.query('INSERT INTO usuarios (id, nombre, email, password, "isVerified") VALUES ($1, $2, $3, $4, $5)', [uuidv4(), 'Administrador', ADMIN_EMAIL, 'admin123', true]);
 
         for (const u of data.usuarios) {
             await client.query('INSERT INTO usuarios (id, nombre, email, password, telefono, "isVerified") VALUES ($1, $2, $3, $4, $5, $6)', [u.id, u.nombre, u.email, u.password, u.telefono, true]);
@@ -253,7 +268,7 @@ app.post('/api/reset-data', async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        await client.query('TRUNCATE usuarios, comercios, banners, pagos, public_usuarios, reportes RESTART IDENTITY CASCADE');
+        await client.query('TRUNCATE usuarios, comercios, banners, pagos, public_usuarios, reportes, analytics_events RESTART IDENTITY CASCADE');
         await client.query('COMMIT');
         console.log("Datos de la DB borrados. Repoblando...");
         await populateDatabase(); // Re-poblar la base
@@ -572,6 +587,119 @@ app.put('/api/public-users/:id', async (req, res) => {
     } catch (err) {
         console.error(`ERROR EN /api/public-users/${id}:`, err.stack);
         res.status(500).json({ error: 'Error al actualizar el usuario público.' });
+    }
+});
+
+
+// --- ANALYTICS ENDPOINTS ---
+
+app.post('/api/track', async (req, res) => {
+    const { comercioId, eventType, usuarioId } = req.body;
+    if (!comercioId || !eventType) {
+        return res.status(400).json({ error: 'Faltan datos para el evento.' });
+    }
+    try {
+        // Obtenemos el rubroId del comercio para denormalizar y facilitar las consultas
+        const comercioRes = await queryWithRetry('SELECT "rubroId" FROM comercios WHERE id = $1', [comercioId]);
+        if (comercioRes.rows.length === 0) {
+            // Si no encontramos el comercio, no registramos el evento para mantener la integridad.
+            return res.status(404).json({ error: 'Comercio no encontrado.' });
+        }
+        const rubroId = comercioRes.rows[0].rubroId;
+
+        await queryWithRetry(
+            'INSERT INTO analytics_events (id, "comercioId", "rubroId", "usuarioId", "eventType") VALUES ($1, $2, $3, $4, $5)',
+            [uuidv4(), comercioId, rubroId, usuarioId || null, eventType]
+        );
+        res.status(201).send();
+    } catch (err) {
+        console.error('ERROR EN /api/track:', err.stack);
+        res.status(500).json({ error: 'Error al registrar el evento.' });
+    }
+});
+
+app.get('/api/analytics', async (req, res) => {
+    const { comercioId, userEmail } = req.query; // userEmail para verificar si es admin
+
+    // --- Vista para un Comerciante específico ---
+    if (comercioId) {
+        try {
+            const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+            
+            const [viewsRes, whatsappRes, websiteRes] = await Promise.all([
+                queryWithRetry('SELECT COUNT(*) FROM analytics_events WHERE "comercioId" = $1 AND "eventType" = $2 AND timestamp >= $3', [comercioId, 'view', thirtyDaysAgo]),
+                queryWithRetry('SELECT COUNT(*) FROM analytics_events WHERE "comercioId" = $1 AND "eventType" = $2 AND timestamp >= $3', [comercioId, 'whatsapp_click', thirtyDaysAgo]),
+                queryWithRetry('SELECT COUNT(*) FROM analytics_events WHERE "comercioId" = $1 AND "eventType" = $2 AND timestamp >= $3', [comercioId, 'website_click', thirtyDaysAgo])
+            ]);
+
+            res.status(200).json({
+                totalViews: parseInt(viewsRes.rows[0].count, 10),
+                totalWhatsappClicks: parseInt(whatsappRes.rows[0].count, 10),
+                totalWebsiteClicks: parseInt(websiteRes.rows[0].count, 10),
+            });
+        } catch (err) {
+            console.error(`ERROR EN /api/analytics para comercio ${comercioId}:`, err.stack);
+            res.status(500).json({ error: 'Error al obtener las métricas del comercio.' });
+        }
+        return;
+    }
+    
+    // --- Vista para Administrador ---
+    if (userEmail !== ADMIN_EMAIL) {
+        return res.status(403).json({ error: 'Acceso denegado.' });
+    }
+
+    try {
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+        const staticData = getInitialData();
+
+        const [visitsByRubroRes, topVisitedRes, totalEventsRes] = await Promise.all([
+            // Visitas por rubro
+            queryWithRetry(`
+                SELECT "rubroId", COUNT(*) as count 
+                FROM analytics_events 
+                WHERE "eventType" = 'view' AND timestamp >= $1
+                GROUP BY "rubroId" 
+                ORDER BY count DESC`, [thirtyDaysAgo]),
+            // Top 5 comercios visitados
+            queryWithRetry(`
+                SELECT "comercioId", c.nombre as "comercioNombre", COUNT(*) as count
+                FROM analytics_events a
+                JOIN comercios c ON a."comercioId" = c.id
+                WHERE a."eventType" = 'view' AND a.timestamp >= $1
+                GROUP BY a."comercioId", c.nombre
+                ORDER BY count DESC
+                LIMIT 5`, [thirtyDaysAgo]),
+            // Totales de eventos
+            queryWithRetry(`
+                SELECT "eventType", COUNT(*) as count
+                FROM analytics_events
+                WHERE timestamp >= $1
+                GROUP BY "eventType"`, [thirtyDaysAgo])
+        ]);
+        
+        const visitsByRubro = visitsByRubroRes.rows.map(row => ({
+            rubroId: row.rubroId,
+            rubroNombre: staticData.rubros.find(r => r.id === row.rubroId)?.nombre || 'Desconocido',
+            count: parseInt(row.count, 10)
+        }));
+
+        const totalEvents = totalEventsRes.rows.reduce((acc, row) => {
+            if (row.eventType === 'view') acc.views = parseInt(row.count, 10);
+            if (row.eventType === 'whatsapp_click') acc.whatsappClicks = parseInt(row.count, 10);
+            if (row.eventType === 'website_click') acc.websiteClicks = parseInt(row.count, 10);
+            return acc;
+        }, { views: 0, whatsappClicks: 0, websiteClicks: 0 });
+
+        res.status(200).json({
+            visitsByRubro,
+            topVisitedComercios: topVisitedRes.rows.map(r => ({...r, count: parseInt(r.count, 10)})),
+            totalEvents,
+        });
+
+    } catch (err) {
+        console.error('ERROR EN /api/analytics para admin:', err.stack);
+        res.status(500).json({ error: 'Error al obtener las métricas de administrador.' });
     }
 });
 
