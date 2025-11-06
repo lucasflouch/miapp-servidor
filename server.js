@@ -107,12 +107,25 @@ const initializeDb = async () => {
         publicidad INTEGER,
         "renovacionAutomatica" BOOLEAN,
         "vencimientoPublicidad" TIMESTAMP,
-        opiniones JSONB DEFAULT '[]',
-        lat REAL,
-        lon REAL
+        opiniones JSONB DEFAULT '[]'
       );
     `);
     
+    // --- MIGRATION SCRIPT ---
+    // Añade las columnas lat y lon a la tabla comercios si no existen.
+    // Esto es crucial para actualizar la base de datos en despliegues posteriores sin borrar datos.
+    console.log('Verificando/aplicando migraciones de base de datos...');
+    try {
+        await queryWithRetry('ALTER TABLE comercios ADD COLUMN IF NOT EXISTS lat REAL;');
+        await queryWithRetry('ALTER TABLE comercios ADD COLUMN IF NOT EXISTS lon REAL;');
+        console.log('Migración de columnas lat/lon completada con éxito.');
+    } catch (migrationError) {
+        console.error('Error crítico durante la migración de la base de datos:', migrationError);
+        // Si la migración falla, es mejor detener el inicio del servidor.
+        throw migrationError;
+    }
+    // --- FIN MIGRATION SCRIPT ---
+
     await queryWithRetry(`
       CREATE TABLE IF NOT EXISTS banners (
           id TEXT PRIMARY KEY,
