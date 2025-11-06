@@ -756,12 +756,7 @@ app.get('/api/analytics', async (req, res) => {
 app.post('/api/conversations/start', async (req, res) => {
     const { clienteId, comercioId } = req.body;
     try {
-        let conversationRes = await queryWithRetry('SELECT * FROM conversations WHERE "clienteId" = $1 AND "comercioId" = $2', [clienteId, comercioId]);
-
-        if (conversationRes.rows.length > 0) {
-            return res.status(200).json(conversationRes.rows[0]);
-        }
-
+        // Paso 1: Obtener los nombres necesarios para la creación.
         const [clienteRes, comercioRes] = await Promise.all([
             queryWithRetry('SELECT nombre, apellido FROM public_usuarios WHERE id = $1', [clienteId]),
             queryWithRetry('SELECT nombre, "imagenUrl" FROM comercios WHERE id = $1', [comercioId])
@@ -771,25 +766,35 @@ app.post('/api/conversations/start', async (req, res) => {
             return res.status(404).json({ error: 'Cliente o comercio no encontrado.' });
         }
 
-        const newConversation = {
-            id: `conv-${uuidv4()}`,
-            clienteId,
-            comercioId,
-            clienteNombre: `${clienteRes.rows[0].nombre} ${clienteRes.rows[0].apellido}`,
-            comercioNombre: comercioRes.rows[0].nombre,
-            comercioImagenUrl: comercioRes.rows[0].imagenUrl,
-        };
+        const clienteNombre = `${clienteRes.rows[0].nombre} ${clienteRes.rows[0].apellido}`;
+        const comercioNombre = comercioRes.rows[0].nombre;
+        const comercioImagenUrl = comercioRes.rows[0].imagenUrl;
 
-        const newConvRes = await queryWithRetry(
-            'INSERT INTO conversations (id, "clienteId", "comercioId", "clienteNombre", "comercioNombre", "comercioImagenUrl") VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-            [newConversation.id, newConversation.clienteId, newConversation.comercioId, newConversation.clienteNombre, newConversation.comercioNombre, newConversation.comercioImagenUrl]
+        // Paso 2: Usar INSERT ... ON CONFLICT para manejar la condición de carrera de forma atómica.
+        // Si el par (clienteId, comercioId) ya existe, no hace nada (DO NOTHING).
+        await queryWithRetry(
+            `INSERT INTO conversations (id, "clienteId", "comercioId", "clienteNombre", "comercioNombre", "comercioImagenUrl") 
+             VALUES ($1, $2, $3, $4, $5, $6) 
+             ON CONFLICT ("clienteId", "comercioId") DO NOTHING`,
+            [`conv-${uuidv4()}`, clienteId, comercioId, clienteNombre, comercioNombre, comercioImagenUrl]
         );
-        res.status(201).json(newConvRes.rows[0]);
+
+        // Paso 3: Después del insert (o del no-op), obtenemos la conversación que ahora garantizamos que existe.
+        const conversationRes = await queryWithRetry('SELECT * FROM conversations WHERE "clienteId" = $1 AND "comercioId" = $2', [clienteId, comercioId]);
+
+        if (conversationRes.rows.length === 0) {
+             // Esto sería muy raro, indicaría un problema más profundo.
+             throw new Error("No se pudo crear o encontrar la conversación después del intento de inserción.");
+        }
+
+        res.status(200).json(conversationRes.rows[0]); // 200 OK porque puede ser una existente o una nueva.
+
     } catch (err) {
         console.error('ERROR en /api/conversations/start:', err.stack);
         res.status(500).json({ error: 'Error al iniciar la conversación.' });
     }
 });
+
 
 // Obtiene todas las conversaciones de un usuario (sea cliente o comerciante)
 app.get('/api/conversations/:userId', async (req, res) => {
