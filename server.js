@@ -1036,6 +1036,67 @@ app.post('/api/marketing/send-summary', async (req, res) => {
 
 
 
+// --- TAREA PROGRAMADA (CRON JOB) PARA GESTIONAR SUSCRIPCIONES ---
+const manageSubscriptions = async () => {
+    console.log(`[CRON] Ejecutando tarea de gestión de suscripciones... ${new Date().toISOString()}`);
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        const now = new Date();
+
+        // 1. Desactivar planes expirados sin renovación automática
+        const downgradeRes = await client.query(
+            `UPDATE comercios 
+             SET publicidad = 1, "vencimientoPublicidad" = NULL, "renovacionAutomatica" = false 
+             WHERE "vencimientoPublicidad" < $1 AND "renovacionAutomatica" = false AND publicidad > 1
+             RETURNING id, nombre`,
+            [now]
+        );
+        
+        if (downgradeRes.rows.length > 0) {
+            downgradeRes.rows.forEach(c => {
+                console.log(`[CRON] Plan para '${c.nombre}' (ID: ${c.id}) ha expirado. Bajado a nivel Gratuito.`);
+            });
+        }
+
+        // 2. Renovar planes con renovación automática
+        const toRenewRes = await client.query(
+            `SELECT id, nombre, publicidad FROM comercios 
+             WHERE "vencimientoPublicidad" < $1 AND "renovacionAutomatica" = true AND publicidad > 1`,
+            [now]
+        );
+
+        if (toRenewRes.rows.length > 0) {
+            for (const comercio of toRenewRes.rows) {
+                const newVencimiento = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+                
+                // Simular un nuevo pago
+                await client.query(
+                    'INSERT INTO pagos (id, "comercioId", monto, fecha, "mercadoPagoId") VALUES ($1, $2, $3, $4, $5)',
+                    [`pay-${uuidv4()}`, comercio.id, AD_PRICES[comercio.publicidad] || 0, now, `mp-sim-auto-${Date.now()}`]
+                );
+
+                // Actualizar la fecha de vencimiento
+                await client.query(
+                    'UPDATE comercios SET "vencimientoPublicidad" = $1 WHERE id = $2',
+                    [newVencimiento, comercio.id]
+                );
+                
+                console.log(`[CRON] Simulando renovación automática para '${comercio.nombre}'. Nuevo vencimiento: ${newVencimiento.toISOString()}`);
+            }
+        }
+
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('[CRON] Error durante la gestión de suscripciones:', err.stack);
+    } finally {
+        client.release();
+    }
+};
+
+
 // --- Iniciar Servidor ---
 const startServer = async () => {
   try {
@@ -1048,6 +1109,10 @@ const startServer = async () => {
     // Solo después de que la DB esté lista, empezamos a escuchar peticiones.
     app.listen(PORT, () => {
       console.log(`Servidor de GuíaComercial escuchando en http://localhost:${PORT}`);
+      // Iniciar la tarea programada después de que el servidor arranque.
+      // Se ejecuta una vez al inicio y luego cada hora.
+      manageSubscriptions(); 
+      setInterval(manageSubscriptions, 60 * 60 * 1000); // 1 hora
     });
 
   } catch (err) {
