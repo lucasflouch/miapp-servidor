@@ -892,6 +892,77 @@ app.post('/api/conversations/:conversationId/read', async (req, res) => {
     }
 });
 
+// --- MARKETING ENDPOINTS ---
+
+app.post('/api/marketing/send-summary', async (req, res) => {
+    const { adminEmail } = req.body;
+
+    // 1. Seguridad: Verificar que es el admin
+    if (adminEmail !== ADMIN_EMAIL) {
+        return res.status(403).json({ error: 'Acceso denegado.' });
+    }
+
+    try {
+        // 2. Obtener todos los comerciantes (usuarios con al menos un comercio), excluyendo al admin.
+        const merchantsRes = await queryWithRetry(`
+            SELECT DISTINCT u.id, u.nombre, u.email
+            FROM usuarios u
+            JOIN comercios c ON u.id = c."usuarioId"
+            WHERE u.email != $1
+        `, [ADMIN_EMAIL]);
+
+        const merchants = merchantsRes.rows;
+        if (merchants.length === 0) {
+            return res.status(200).json({ message: "No se encontraron comerciantes a quienes enviar el resumen." });
+        }
+
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+        let emailsSentCount = 0;
+
+        // 3. Iterar sobre cada comerciante para calcular sus métricas y "enviar" el email.
+        for (const merchant of merchants) {
+            // Obtener todos los comercios de este comerciante
+            const comerciosRes = await queryWithRetry('SELECT id, nombre FROM comercios WHERE "usuarioId" = $1', [merchant.id]);
+            const merchantComercios = comerciosRes.rows;
+            const comercioIds = merchantComercios.map(c => c.id);
+
+            if (comercioIds.length === 0) continue; // Saltear si no tiene comercios (aunque la query inicial ya lo filtra)
+
+            // Calcular métricas agregadas para todos sus comercios
+            const analyticsRes = await queryWithRetry(`
+                SELECT "eventType", COUNT(*) as count
+                FROM analytics_events
+                WHERE "comercioId" = ANY($1::text[]) AND timestamp >= $2
+                GROUP BY "eventType"
+            `, [comercioIds, thirtyDaysAgo]);
+
+            const stats = analyticsRes.rows.reduce((acc, row) => {
+                if (row.eventType === 'view') acc.views = parseInt(row.count, 10);
+                if (row.eventType === 'whatsapp_click') acc.whatsappClicks = parseInt(row.count, 10);
+                if (row.eventType === 'website_click') acc.websiteClicks = parseInt(row.count, 10);
+                return acc;
+            }, { views: 0, whatsappClicks: 0, websiteClicks: 0 });
+
+            // 4. Simular el envío de email
+            const emailBody = `¡Hola ${merchant.nombre}!\n\nEste es el resumen de actividad de tus comercios en GuíaComercial para los últimos 30 días:\n\n- Visitas totales a tus fichas: ${stats.views}\n- Clics a WhatsApp: ${stats.whatsappClicks}\n- Clics a tu sitio web: ${stats.websiteClicks}\n\n¡Seguí así! Para mejorar tu visibilidad, considerá promocionar tus comercios desde tu panel.\n\nSaludos,\nEl equipo de GuíaComercial.`;
+            
+            console.log("--- SIMULANDO ENVÍO DE EMAIL ---");
+            console.log(`Para: ${merchant.email}`);
+            console.log(`Asunto: Tu resumen mensual de GuíaComercial`);
+            console.log(`Cuerpo:\n${emailBody}`);
+            console.log("---------------------------------");
+            
+            emailsSentCount++;
+        }
+
+        res.status(200).json({ message: `¡Éxito! Resúmenes enviados a ${emailsSentCount} comerciantes.` });
+
+    } catch (err) {
+        console.error('ERROR EN /api/marketing/send-summary:', err.stack);
+        res.status(500).json({ error: 'Error al procesar los resúmenes de marketing.' });
+    }
+});
+
 
 // --- Iniciar Servidor ---
 const startServer = async () => {
