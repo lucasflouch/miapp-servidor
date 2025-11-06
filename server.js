@@ -107,7 +107,9 @@ const initializeDb = async () => {
         publicidad INTEGER,
         "renovacionAutomatica" BOOLEAN,
         "vencimientoPublicidad" TIMESTAMP,
-        opiniones JSONB DEFAULT '[]'
+        opiniones JSONB DEFAULT '[]',
+        lat REAL,
+        lon REAL
       );
     `);
     
@@ -234,8 +236,8 @@ const populateDatabase = async () => {
             await client.query('INSERT INTO usuarios (id, nombre, email, password, telefono, "isVerified") VALUES ($1, $2, $3, $4, $5, $6)', [u.id, u.nombre, u.email, u.password, u.telefono, true]);
         }
         for (const c of data.comercios) {
-            await client.query('INSERT INTO comercios (id, nombre, "imagenUrl", "rubroId", "subRubroId", "provinciaId", "provinciaNombre", "ciudadId", "ciudadNombre", barrio, "usuarioId", whatsapp, direccion, "googleMapsUrl", "websiteUrl", description, "galeriaImagenes", publicidad, "renovacionAutomatica", "vencimientoPublicidad", opiniones) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)', 
-            [c.id, c.nombre, c.imagenUrl, c.rubroId, c.subRubroId, c.provinciaId, c.provinciaNombre, c.ciudadId, c.ciudadNombre, c.barrio, c.usuarioId, c.whatsapp, c.direccion, c.googleMapsUrl, c.websiteUrl, c.description, JSON.stringify(c.galeriaImagenes || []), c.publicidad, c.renovacionAutomatica, c.vencimientoPublicidad, JSON.stringify(c.opiniones || [])]);
+            await client.query('INSERT INTO comercios (id, nombre, "imagenUrl", "rubroId", "subRubroId", "provinciaId", "provinciaNombre", "ciudadId", "ciudadNombre", barrio, "usuarioId", whatsapp, direccion, "googleMapsUrl", "websiteUrl", description, "galeriaImagenes", publicidad, "renovacionAutomatica", "vencimientoPublicidad", opiniones, lat, lon) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)', 
+            [c.id, c.nombre, c.imagenUrl, c.rubroId, c.subRubroId, c.provinciaId, c.provinciaNombre, c.ciudadId, c.ciudadNombre, c.barrio, c.usuarioId, c.whatsapp, c.direccion, c.googleMapsUrl, c.websiteUrl, c.description, JSON.stringify(c.galeriaImagenes || []), c.publicidad, c.renovacionAutomatica, c.vencimientoPublicidad, JSON.stringify(c.opiniones || []), c.lat, c.lon]);
         }
         for (const b of data.banners) {
             await client.query('INSERT INTO banners (id, "comercioId", "imagenUrl", "venceEl") VALUES ($1, $2, $3, $4)', [b.id, b.comercioId, b.imagenUrl, b.venceEl]);
@@ -403,6 +405,24 @@ app.put('/api/usuarios/:id', async (req, res) => {
 app.post('/api/comercios', async (req, res) => {
     const data = req.body;
     const vencimiento = data.publicidad > 1 ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : null;
+    
+    let lat = null;
+    let lon = null;
+    if(data.ciudadId) {
+        try {
+            const geoResponse = await fetch(`https://apis.datos.gob.ar/georef/api/municipios?id=${data.ciudadId}&campos=centroide.lat,centroide.lon`);
+            if (geoResponse.ok) {
+                const geoData = await geoResponse.json();
+                if (geoData.municipios && geoData.municipios.length > 0) {
+                    lat = geoData.municipios[0].centroide.lat;
+                    lon = geoData.municipios[0].centroide.lon;
+                }
+            }
+        } catch (geoErr) {
+            console.error("Error fetching geolocation during creation:", geoErr);
+        }
+    }
+
     const newComercio = {
         id: `co-${uuidv4()}`,
         ...data,
@@ -410,11 +430,13 @@ app.post('/api/comercios', async (req, res) => {
         renovacionAutomatica: data.publicidad > 1 ? data.renovacionAutomatica : false,
         vencimientoPublicidad: vencimiento,
         opiniones: data.opiniones || [],
+        lat,
+        lon
     };
     
     try {
-        await queryWithRetry('INSERT INTO comercios (id, nombre, "imagenUrl", "rubroId", "subRubroId", "provinciaId", "provinciaNombre", "ciudadId", "ciudadNombre", barrio, "usuarioId", whatsapp, direccion, "googleMapsUrl", "websiteUrl", description, "galeriaImagenes", publicidad, "renovacionAutomatica", "vencimientoPublicidad", opiniones) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)',
-            [newComercio.id, newComercio.nombre, newComercio.imagenUrl, newComercio.rubroId, newComercio.subRubroId, newComercio.provinciaId, newComercio.provinciaNombre, newComercio.ciudadId, newComercio.ciudadNombre, newComercio.barrio, newComercio.usuarioId, newComercio.whatsapp, newComercio.direccion, newComercio.googleMapsUrl, newComercio.websiteUrl, newComercio.description, JSON.stringify(newComercio.galeriaImagenes || []), newComercio.publicidad, newComercio.renovacionAutomatica, newComercio.vencimientoPublicidad, JSON.stringify(newComercio.opiniones || [])]);
+        await queryWithRetry('INSERT INTO comercios (id, nombre, "imagenUrl", "rubroId", "subRubroId", "provinciaId", "provinciaNombre", "ciudadId", "ciudadNombre", barrio, "usuarioId", whatsapp, direccion, "googleMapsUrl", "websiteUrl", description, "galeriaImagenes", publicidad, "renovacionAutomatica", "vencimientoPublicidad", opiniones, lat, lon) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)',
+            [newComercio.id, newComercio.nombre, newComercio.imagenUrl, newComercio.rubroId, newComercio.subRubroId, newComercio.provinciaId, newComercio.provinciaNombre, newComercio.ciudadId, newComercio.ciudadNombre, newComercio.barrio, newComercio.usuarioId, newComercio.whatsapp, newComercio.direccion, newComercio.googleMapsUrl, newComercio.websiteUrl, newComercio.description, JSON.stringify(newComercio.galeriaImagenes || []), newComercio.publicidad, newComercio.renovacionAutomatica, newComercio.vencimientoPublicidad, JSON.stringify(newComercio.opiniones || []), newComercio.lat, newComercio.lon]);
         res.status(201).json(newComercio);
     } catch (err) {
         console.error('ERROR EN /api/comercios (POST):', err.stack);
@@ -425,10 +447,35 @@ app.post('/api/comercios', async (req, res) => {
 
 app.put('/api/comercios/:id', async (req, res) => {
     const { id } = req.params;
-    const { nombre, imagenUrl, rubroId, subRubroId, provinciaId, provinciaNombre, ciudadId, ciudadNombre, barrio, whatsapp, direccion, googleMapsUrl, websiteUrl, description, galeriaImagenes, renovacionAutomatica } = req.body;
+    const data = req.body;
+    
     try {
-        await queryWithRetry('UPDATE comercios SET nombre=$1, "imagenUrl"=$2, "rubroId"=$3, "subRubroId"=$4, "provinciaId"=$5, "provinciaNombre"=$6, "ciudadId"=$7, "ciudadNombre"=$8, barrio=$9, whatsapp=$10, direccion=$11, "googleMapsUrl"=$12, "websiteUrl"=$13, description=$14, "galeriaImagenes"=$15, "renovacionAutomatica"=$16 WHERE id = $17',
-            [nombre, imagenUrl, rubroId, subRubroId, provinciaId, provinciaNombre, ciudadId, ciudadNombre, barrio, whatsapp, direccion, googleMapsUrl, websiteUrl, description, JSON.stringify(galeriaImagenes || []), renovacionAutomatica, id]);
+        const existingComercioRes = await queryWithRetry('SELECT "ciudadId", lat, lon FROM comercios WHERE id = $1', [id]);
+        if (existingComercioRes.rows.length === 0) {
+            return res.status(404).json({ error: "Comercio no encontrado." });
+        }
+        const existingComercio = existingComercioRes.rows[0];
+
+        let lat = existingComercio.lat;
+        let lon = existingComercio.lon;
+
+        if (data.ciudadId && (existingComercio.ciudadId !== data.ciudadId || !lat || !lon)) {
+             try {
+                const geoResponse = await fetch(`https://apis.datos.gob.ar/georef/api/municipios?id=${data.ciudadId}&campos=centroide.lat,centroide.lon`);
+                if (geoResponse.ok) {
+                    const geoData = await geoResponse.json();
+                    if (geoData.municipios && geoData.municipios.length > 0) {
+                        lat = geoData.municipios[0].centroide.lat;
+                        lon = geoData.municipios[0].centroide.lon;
+                    }
+                }
+            } catch (geoErr) {
+                console.error("Error fetching geolocation on update:", geoErr);
+            }
+        }
+
+        await queryWithRetry('UPDATE comercios SET nombre=$1, "imagenUrl"=$2, "rubroId"=$3, "subRubroId"=$4, "provinciaId"=$5, "provinciaNombre"=$6, "ciudadId"=$7, "ciudadNombre"=$8, barrio=$9, whatsapp=$10, direccion=$11, "googleMapsUrl"=$12, "websiteUrl"=$13, description=$14, "galeriaImagenes"=$15, "renovacionAutomatica"=$16, lat=$17, lon=$18 WHERE id = $19',
+            [data.nombre, data.imagenUrl, data.rubroId, data.subRubroId, data.provinciaId, data.provinciaNombre, data.ciudadId, data.ciudadNombre, data.barrio, data.whatsapp, data.direccion, data.googleMapsUrl, data.websiteUrl, data.description, JSON.stringify(data.galeriaImagenes || []), data.renovacionAutomatica, lat, lon, id]);
         
         const result = await queryWithRetry('SELECT * FROM comercios WHERE id = $1', [id]);
         res.status(200).json(result.rows[0]);
@@ -962,6 +1009,7 @@ app.post('/api/marketing/send-summary', async (req, res) => {
         res.status(500).json({ error: 'Error al procesar los resúmenes de marketing.' });
     }
 });
+
 
 
 // --- Iniciar Servidor ---
