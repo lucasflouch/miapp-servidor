@@ -106,7 +106,8 @@ const initializeDb = async () => {
         "galeriaImagenes" JSONB,
         publicidad INTEGER,
         "renovacionAutomatica" BOOLEAN,
-        "vencimientoPublicidad" TIMESTAMP
+        "vencimientoPublicidad" TIMESTAMP,
+        opiniones JSONB DEFAULT '[]'
       );
     `);
     
@@ -166,23 +167,33 @@ const initializeDb = async () => {
       );
     `);
 
-    console.log('Verificando y aplicando migraciones de esquema necesarias...');
-    try {
-        // MIGRACIÓN: Asegurarse de que la columna 'opiniones' exista en 'comercios'
-        const checkOpinionesColumn = await queryWithRetry(`
-            SELECT 1 FROM information_schema.columns 
-            WHERE table_name = 'comercios' AND column_name = 'opiniones'
-        `);
-        if (checkOpinionesColumn.rows.length === 0) {
-            console.log("MIGRACIÓN: La columna 'opiniones' no existe en la tabla 'comercios'. Añadiéndola...");
-            await queryWithRetry(`ALTER TABLE comercios ADD COLUMN opiniones JSONB DEFAULT '[]'`);
-            console.log("MIGRACIÓN: Columna 'opiniones' añadida con éxito.");
-        }
-    } catch (migrationError) {
-        console.error("FALLO CRÍTICO DURANTE MIGRACIÓN DE ESQUEMA:", migrationError.stack);
-        throw migrationError; // Lanzar el error para detener el arranque del servidor.
-    }
-    console.log('Verificación de esquema completada.');
+    // --- NUEVAS TABLAS PARA EL CHAT ---
+    await queryWithRetry(`
+      CREATE TABLE IF NOT EXISTS conversations (
+        id TEXT PRIMARY KEY,
+        "clienteId" TEXT NOT NULL,
+        "comercioId" TEXT NOT NULL,
+        "clienteNombre" VARCHAR(255) NOT NULL,
+        "comercioNombre" VARCHAR(255) NOT NULL,
+        "comercioImagenUrl" TEXT NOT NULL,
+        "lastMessage" TEXT,
+        "lastMessageTimestamp" TIMESTAMP WITH TIME ZONE,
+        "lastMessageSenderId" TEXT,
+        UNIQUE("clienteId", "comercioId")
+      );
+    `);
+
+    await queryWithRetry(`
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id TEXT PRIMARY KEY,
+        "conversationId" TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        "senderId" TEXT NOT NULL,
+        content TEXT NOT NULL,
+        timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        "isRead" BOOLEAN DEFAULT false
+      );
+    `);
+    console.log('Tablas de Chat verificadas/creadas.');
 
     // --- LÓGICA MEJORADA ---
     // Primero, comprobar si la base de datos está completamente vacía.
@@ -279,7 +290,7 @@ app.post('/api/reset-data', async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        await client.query('TRUNCATE usuarios, comercios, banners, pagos, public_usuarios, reportes, analytics_events RESTART IDENTITY CASCADE');
+        await client.query('TRUNCATE usuarios, comercios, banners, pagos, public_usuarios, reportes, analytics_events, conversations, chat_messages RESTART IDENTITY CASCADE');
         await client.query('COMMIT');
         console.log("Datos de la DB borrados. Repoblando...");
         await populateDatabase(); // Re-poblar la base
@@ -345,11 +356,23 @@ app.post('/api/verify', async (req, res) => {
 app.post('/api/login', async (req, res) => {
     const { email, password: inputPassword } = req.body;
     try {
-        const result = await queryWithRetry('SELECT * FROM usuarios WHERE email = $1', [email]);
-        const user = result.rows[0];
+        const userRes = await queryWithRetry('SELECT * FROM usuarios WHERE email = $1', [email]);
+        const user = userRes.rows[0];
 
         if (!user || user.password !== inputPassword) return res.status(401).json({ error: 'Email o contraseña incorrectos.' });
         if (!user.isVerified) return res.status(403).json({ error: 'Tu cuenta no ha sido verificado.' });
+        
+        // Contar mensajes no leídos como comerciante
+        const unreadRes = await queryWithRetry(`
+            SELECT COUNT(m.id) 
+            FROM chat_messages m
+            JOIN conversations c ON m."conversationId" = c.id
+            WHERE c."comercioId" = (SELECT id FROM comercios WHERE "usuarioId" = $1 LIMIT 1)
+            AND m."senderId" != $1 
+            AND m."isRead" = false
+        `, [user.id]);
+
+        user.unreadMessageCount = parseInt(unreadRes.rows[0].count, 10);
         
         delete user.password;
         res.status(200).json(user);
@@ -559,12 +582,24 @@ app.post('/api/public-login', async (req, res) => {
     }
 
     try {
-        const result = await queryWithRetry('SELECT * FROM public_usuarios WHERE email = $1', [email]);
-        const user = result.rows[0];
+        const userRes = await queryWithRetry('SELECT * FROM public_usuarios WHERE email = $1', [email]);
+        const user = userRes.rows[0];
 
         if (!user || user.password !== inputPassword) {
             return res.status(401).json({ error: 'Email o contraseña incorrectos.' });
         }
+
+        // Contar mensajes no leídos como cliente
+        const unreadRes = await queryWithRetry(`
+            SELECT COUNT(m.id) 
+            FROM chat_messages m
+            JOIN conversations c ON m."conversationId" = c.id
+            WHERE c."clienteId" = $1 
+            AND m."senderId" != $1 
+            AND m."isRead" = false
+        `, [user.id]);
+        
+        user.unreadMessageCount = parseInt(unreadRes.rows[0].count, 10);
         
         delete user.password;
         res.status(200).json(user);
@@ -711,6 +746,144 @@ app.get('/api/analytics', async (req, res) => {
     } catch (err) {
         console.error('ERROR EN /api/analytics para admin:', err.stack);
         res.status(500).json({ error: 'Error al obtener las métricas de administrador.' });
+    }
+});
+
+
+// --- CHAT ENDPOINTS ---
+
+// Inicia o encuentra una conversación entre un cliente y un comercio
+app.post('/api/conversations/start', async (req, res) => {
+    const { clienteId, comercioId } = req.body;
+    try {
+        let conversationRes = await queryWithRetry('SELECT * FROM conversations WHERE "clienteId" = $1 AND "comercioId" = $2', [clienteId, comercioId]);
+
+        if (conversationRes.rows.length > 0) {
+            return res.status(200).json(conversationRes.rows[0]);
+        }
+
+        const [clienteRes, comercioRes] = await Promise.all([
+            queryWithRetry('SELECT nombre, apellido FROM public_usuarios WHERE id = $1', [clienteId]),
+            queryWithRetry('SELECT nombre, "imagenUrl" FROM comercios WHERE id = $1', [comercioId])
+        ]);
+
+        if (clienteRes.rows.length === 0 || comercioRes.rows.length === 0) {
+            return res.status(404).json({ error: 'Cliente o comercio no encontrado.' });
+        }
+
+        const newConversation = {
+            id: `conv-${uuidv4()}`,
+            clienteId,
+            comercioId,
+            clienteNombre: `${clienteRes.rows[0].nombre} ${clienteRes.rows[0].apellido}`,
+            comercioNombre: comercioRes.rows[0].nombre,
+            comercioImagenUrl: comercioRes.rows[0].imagenUrl,
+        };
+
+        const newConvRes = await queryWithRetry(
+            'INSERT INTO conversations (id, "clienteId", "comercioId", "clienteNombre", "comercioNombre", "comercioImagenUrl") VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+            [newConversation.id, newConversation.clienteId, newConversation.comercioId, newConversation.clienteNombre, newConversation.comercioNombre, newConversation.comercioImagenUrl]
+        );
+        res.status(201).json(newConvRes.rows[0]);
+    } catch (err) {
+        console.error('ERROR en /api/conversations/start:', err.stack);
+        res.status(500).json({ error: 'Error al iniciar la conversación.' });
+    }
+});
+
+// Obtiene todas las conversaciones de un usuario (sea cliente o comerciante)
+app.get('/api/conversations/:userId', async (req, res) => {
+    const { userId } = req.params;
+    try {
+        const conversationsRes = await queryWithRetry(`
+            SELECT 
+                c.*,
+                (SELECT COUNT(*) FROM chat_messages cm WHERE cm."conversationId" = c.id AND cm."senderId" != $1 AND cm."isRead" = false) as unread_count
+            FROM conversations c
+            WHERE c."clienteId" = $1 OR c."comercioId" IN (SELECT id FROM comercios WHERE "usuarioId" = $1)
+            ORDER BY "lastMessageTimestamp" DESC NULLS LAST
+        `, [userId]);
+        
+        // Mapear el nombre del contador
+        const conversations = conversationsRes.rows.map(row => {
+            const isCliente = row.clienteId === userId;
+            const unreadCount = parseInt(row.unread_count, 10);
+            return {
+                ...row,
+                unreadByCliente: isCliente ? unreadCount : 0,
+                unreadByComercio: !isCliente ? unreadCount : 0,
+            };
+        });
+
+        res.status(200).json(conversations);
+    } catch (err) {
+        console.error(`ERROR en /api/conversations/${userId}:`, err.stack);
+        res.status(500).json({ error: 'Error al obtener las conversaciones.' });
+    }
+});
+
+
+// Obtiene los mensajes de una conversación
+app.get('/api/messages/:conversationId', async (req, res) => {
+    const { conversationId } = req.params;
+    try {
+        const messagesRes = await queryWithRetry('SELECT * FROM chat_messages WHERE "conversationId" = $1 ORDER BY timestamp ASC', [conversationId]);
+        res.status(200).json(messagesRes.rows);
+    } catch (err) {
+        console.error(`ERROR en /api/messages/${conversationId}:`, err.stack);
+        res.status(500).json({ error: 'Error al obtener los mensajes.' });
+    }
+});
+
+// Envía un nuevo mensaje
+app.post('/api/messages', async (req, res) => {
+    const { conversationId, senderId, content } = req.body;
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        
+        const newMessage = {
+            id: `msg-${uuidv4()}`,
+            conversationId,
+            senderId,
+            content,
+            timestamp: new Date()
+        };
+        
+        const messageRes = await client.query(
+            'INSERT INTO chat_messages (id, "conversationId", "senderId", content, timestamp) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+            [newMessage.id, newMessage.conversationId, newMessage.senderId, newMessage.content, newMessage.timestamp]
+        );
+
+        await client.query(
+            'UPDATE conversations SET "lastMessage" = $1, "lastMessageTimestamp" = $2, "lastMessageSenderId" = $3 WHERE id = $4',
+            [newMessage.content, newMessage.timestamp, newMessage.senderId, newMessage.conversationId]
+        );
+
+        await client.query('COMMIT');
+        res.status(201).json(messageRes.rows[0]);
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('ERROR en /api/messages (POST):', err.stack);
+        res.status(500).json({ error: 'Error al enviar el mensaje.' });
+    } finally {
+        client.release();
+    }
+});
+
+// Marca los mensajes de una conversación como leídos por un usuario
+app.post('/api/conversations/:conversationId/read', async (req, res) => {
+    const { conversationId } = req.params;
+    const { userId } = req.body; // El usuario que está leyendo
+    try {
+        await queryWithRetry(
+            'UPDATE chat_messages SET "isRead" = true WHERE "conversationId" = $1 AND "senderId" != $2 AND "isRead" = false',
+            [conversationId, userId]
+        );
+        res.status(200).json({ message: 'Mensajes marcados como leídos.' });
+    } catch (err) {
+        console.error(`ERROR en /api/conversations/${conversationId}/read:`, err.stack);
+        res.status(500).json({ error: 'Error al marcar mensajes como leídos.' });
     }
 });
 
