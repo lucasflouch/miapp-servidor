@@ -485,27 +485,6 @@ app.put('/api/comercios/:id', async (req, res) => {
     }
 });
 
-app.post('/api/comercios/:id/upgrade', async (req, res) => {
-    const { id } = req.params;
-    const { newLevel } = req.body;
-    const vencimiento = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-
-    try {
-        await queryWithRetry('UPDATE comercios SET publicidad = $1, "vencimientoPublicidad" = $2 WHERE id = $3', [newLevel, vencimiento, id]);
-        
-        const newPago = { id: `pay-${uuidv4()}`, comercioId: id, monto: AD_PRICES[newLevel], fecha: new Date(), mercadoPagoId: `mp-test-${Date.now()}`};
-        await queryWithRetry('INSERT INTO pagos (id, "comercioId", monto, fecha, "mercadoPagoId") VALUES ($1,$2,$3,$4,$5)',
-            [newPago.id, newPago.comercioId, newPago.monto, newPago.fecha, newPago.mercadoPagoId]);
-
-        const result = await queryWithRetry('SELECT * FROM comercios WHERE id = $1', [id]);
-        res.status(200).json({ updatedComercio: result.rows[0], newPago });
-
-    } catch (err) {
-        console.error(`ERROR EN /api/comercios/${id}/upgrade:`, err.stack);
-        res.status(500).json({ error: 'Error al actualizar el plan.' });
-    }
-});
-
 app.post('/api/comercios/:id/opinar', async (req, res) => {
     const { id: comercioId } = req.params;
     const { usuarioId, usuarioNombre, texto, rating } = req.body;
@@ -793,6 +772,51 @@ app.get('/api/analytics', async (req, res) => {
     } catch (err) {
         console.error('ERROR EN /api/analytics para admin:', err.stack);
         res.status(500).json({ error: 'Error al obtener las métricas de administrador.' });
+    }
+});
+
+
+// --- PAYMENTS ENDPOINTS (SIMULATED MERCADO PAGO FLOW) ---
+app.post('/api/payments/create-preference', (req, res) => {
+    const { comercioId, newLevel } = req.body;
+    if (!comercioId || !newLevel) {
+        return res.status(400).json({ error: 'Faltan datos para crear la preferencia de pago.' });
+    }
+    console.log(`Simulando creación de preferencia de Mercado Pago para comercio ${comercioId} al nivel ${newLevel}`);
+    
+    // En una implementación real, aquí se usaría el SDK de Mercado Pago para crear
+    // una preferencia y se guardaría la relación en la DB.
+    // Para la simulación, solo devolvemos un ID falso.
+    res.status(201).json({ preferenceId: `pref-sim-${uuidv4()}` });
+});
+
+app.post('/api/payments/confirm-payment', async (req, res) => {
+    const { comercioId, newLevel } = req.body;
+     if (!comercioId || !newLevel) {
+        return res.status(400).json({ error: 'Faltan datos para confirmar el pago.' });
+    }
+
+    const vencimiento = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+    try {
+        await queryWithRetry('UPDATE comercios SET publicidad = $1, "vencimientoPublicidad" = $2 WHERE id = $3', [newLevel, vencimiento, comercioId]);
+        
+        const newPago = { 
+            id: `pay-${uuidv4()}`, 
+            comercioId: comercioId, 
+            monto: AD_PRICES[newLevel] || 0, 
+            fecha: new Date(), 
+            mercadoPagoId: `mp-sim-${Date.now()}`
+        };
+        
+        await queryWithRetry('INSERT INTO pagos (id, "comercioId", monto, fecha, "mercadoPagoId") VALUES ($1,$2,$3,$4,$5)',
+            [newPago.id, newPago.comercioId, newPago.monto, newPago.fecha, newPago.mercadoPagoId]);
+
+        res.status(200).json({ message: "¡Plan actualizado con éxito! Tu comercio ahora tiene mayor visibilidad." });
+
+    } catch (err) {
+        console.error(`ERROR EN /api/payments/confirm-payment para comercio ${comercioId}:`, err.stack);
+        res.status(500).json({ error: 'Error al confirmar el pago y actualizar el plan.' });
     }
 });
 
