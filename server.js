@@ -507,6 +507,7 @@ app.post('/api/comercios/:id/opinar', async (req, res) => {
             rating,
             texto: texto || '', // El texto es opcional
             timestamp: new Date().toISOString(),
+            likes: [], // Inicializar likes
         };
         const newOpiniones = [...opiniones, newOpinion];
 
@@ -520,6 +521,82 @@ app.post('/api/comercios/:id/opinar', async (req, res) => {
     } catch (err) {
         console.error(`ERROR EN /api/comercios/${comercioId}/opinar:`, err.stack);
         res.status(500).json({ error: 'Error al guardar la opinión.' });
+    }
+});
+
+app.post('/api/comercios/:comercioId/opiniones/:opinionId/responder', async (req, res) => {
+    const { comercioId, opinionId } = req.params;
+    const { texto, usuarioId } = req.body; // usuarioId del comerciante para verificar ownership
+
+    try {
+        const comercioRes = await queryWithRetry('SELECT * FROM comercios WHERE id = $1', [comercioId]);
+        if (comercioRes.rows.length === 0) {
+            return res.status(404).json({ error: 'Comercio no encontrado.' });
+        }
+        const comercio = comercioRes.rows[0];
+
+        if (comercio.usuarioId !== usuarioId) {
+            return res.status(403).json({ error: 'No autorizado para responder a esta opinión.' });
+        }
+
+        const opiniones = comercio.opiniones || [];
+        const opinionIndex = opiniones.findIndex(o => o.id === opinionId);
+
+        if (opinionIndex === -1) {
+            return res.status(404).json({ error: 'Opinión no encontrada.' });
+        }
+        if (opiniones[opinionIndex].respuesta) {
+            return res.status(400).json({ error: 'Esta opinión ya tiene una respuesta.' });
+        }
+
+        opiniones[opinionIndex].respuesta = {
+            texto,
+            timestamp: new Date().toISOString(),
+        };
+
+        const updateResult = await queryWithRetry('UPDATE comercios SET opiniones = $1 WHERE id = $2 RETURNING *', [JSON.stringify(opiniones), comercioId]);
+        res.status(200).json(updateResult.rows[0]);
+
+    } catch (err) {
+        console.error(`ERROR EN .../responder:`, err.stack);
+        res.status(500).json({ error: 'Error al guardar la respuesta.' });
+    }
+});
+
+app.post('/api/comercios/:comercioId/opiniones/:opinionId/like', async (req, res) => {
+    const { comercioId, opinionId } = req.params;
+    const { usuarioId } = req.body; // publicUserId del que da like
+
+    try {
+        const comercioRes = await queryWithRetry('SELECT * FROM comercios WHERE id = $1', [comercioId]);
+        if (comercioRes.rows.length === 0) {
+            return res.status(404).json({ error: 'Comercio no encontrado.' });
+        }
+        const comercio = comercioRes.rows[0];
+
+        const opiniones = comercio.opiniones || [];
+        const opinionIndex = opiniones.findIndex(o => o.id === opinionId);
+
+        if (opinionIndex === -1) {
+            return res.status(404).json({ error: 'Opinión no encontrada.' });
+        }
+
+        const opinion = opiniones[opinionIndex];
+        opinion.likes = opinion.likes || [];
+        const likeIndex = opinion.likes.indexOf(usuarioId);
+
+        if (likeIndex > -1) {
+            opinion.likes.splice(likeIndex, 1); // Unlike
+        } else {
+            opinion.likes.push(usuarioId); // Like
+        }
+
+        const updateResult = await queryWithRetry('UPDATE comercios SET opiniones = $1 WHERE id = $2 RETURNING *', [JSON.stringify(opiniones), comercioId]);
+        res.status(200).json(updateResult.rows[0]);
+
+    } catch (err) {
+        console.error(`ERROR EN .../like:`, err.stack);
+        res.status(500).json({ error: 'Error al procesar el "me gusta".' });
     }
 });
 
@@ -1095,7 +1172,7 @@ const manageSubscriptions = async () => {
         client.release();
     }
 };
-
+ 
 
 // --- Iniciar Servidor ---
 const startServer = async () => {
