@@ -5,8 +5,9 @@ const { v4: uuidv4 } = require('uuid');
 const { Pool } = require('pg');
 const path = require('path');
 
-// Corregimos la ruta para que funcione en el entorno de Render
-const { getInitialData } = require(path.join(__dirname, '..', 'dist', 'mockData.js'));
+// Corregimos la ruta para que funcione en el entorno de Render.
+// __dirname apunta a /opt/render/project/src, que es la raíz del proyecto.
+const { getInitialData } = require(path.join(__dirname, 'dist', 'mockData.js'));
 
 
 const app = express();
@@ -20,8 +21,8 @@ const pool = new Pool({
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// Corregimos la ruta para servir archivos estáticos desde la carpeta 'dist' en la raíz del proyecto
-const distPath = path.join(__dirname, '..', 'dist');
+// Corregimos la ruta para servir archivos estáticos desde la carpeta 'dist' en la raíz del proyecto.
+const distPath = path.join(__dirname, 'dist');
 app.use(express.static(distPath));
 
 
@@ -268,9 +269,9 @@ app.post('/api/reset-data', async (req, res) => {
 
 // --- RUTA CATCH-ALL ---
 // Esta ruta debe ir al final. Sirve el index.html para cualquier ruta que no sea de la API.
-// Corregimos la ruta para que funcione en el entorno de Render
+// Corregimos la ruta para que funcione en el entorno de Render.
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
 const startServer = async () => {
