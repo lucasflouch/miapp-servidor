@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="es">
   <head>
@@ -7,6 +8,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Guía de Comercios Locales</title>
 
+    <script>
+      // Script para forzar la eliminación de Service Workers antiguos y corruptos
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function(registrations) {
+          for(let registration of registrations) {
+            registration.unregister()
+              .then(function() { console.log('Service Worker desregistrado:', registration.scope); })
+              .catch(function(err) { console.error('Error al desregistrar Service Worker:', err); });
+          }
+        });
+      }
+    </script>
+    
     <!-- PWA Manifest (temporalmente desactivado para limpiar caché) -->
     <!-- <link rel="manifest" href="/manifest.json" /> -->
     <meta name="theme-color" content="#4f46e5" />
