@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "build": "rm -rf dist && mkdir -p dist && cp public/index.html dist/ && esbuild src/index.tsx --bundle --outfile=dist/index.js --loader:.tsx=tsx"
+    "build": "rm -rf dist && mkdir -p dist && cp public/* dist/ && esbuild src/index.tsx --bundle --outfile=dist/index.js --loader:.tsx=tsx"
   },
   "author": "",
   "license": "ISC",
