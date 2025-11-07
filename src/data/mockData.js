@@ -1,5 +1,3 @@
-import { AppData } from '../types';
-
 const today = new Date();
 const futureDate = new Date();
 futureDate.setDate(today.getDate() + 30);
@@ -9,7 +7,7 @@ const anotherFutureDate = new Date();
 anotherFutureDate.setDate(today.getDate() + 15);
 
 
-export const initialData: AppData = {
+const initialData = {
   provincias: [
     { id: '02', nombre: 'Ciudad Autónoma de Buenos Aires' },
     { id: '06', nombre: 'Buenos Aires' },
@@ -172,5 +170,6 @@ export const initialData: AppData = {
   ],
 };
 
-// Se exporta una función que devuelve una copia profunda para evitar problemas de caché.
-export const getInitialData = (): AppData => JSON.parse(JSON.stringify(initialData));
+module.exports = { 
+  getInitialData: () => JSON.parse(JSON.stringify(initialData))
+};
