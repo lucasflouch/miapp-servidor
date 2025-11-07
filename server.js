@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
 const { Pool } = require('pg');
-const { getInitialData } = require('./mockData.js');
+const { getInitialData } = require('./src/data/mockData.js'); // Actualizado a la nueva ruta
 const path = require('path');
 
 const app = express();
@@ -17,6 +17,7 @@ const pool = new Pool({
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+// Servir archivos estÃ¡ticos desde la carpeta 'dist'
 app.use(express.static(path.join(__dirname, 'dist')));
 
 const AD_PRICES = { 1: 0, 2: 1500, 3: 3000, 4: 5000, 5: 8000, 6: 12000 };
@@ -31,7 +32,7 @@ const queryWithRetry = async (queryText, params) => {
       const result = await pool.query(queryText, params);
       return result;
     } catch (err) {
-      console.error(`Intento ${attempt} de la consulta falló. Error: ${err.message}`);
+      console.error(`Intento ${attempt} de la consulta fallÃ³. Error: ${err.message}`);
       if (attempt === MAX_RETRIES) throw err;
       await new Promise(res => setTimeout(res, RETRY_DELAY * Math.pow(2, attempt - 1)));
     }
@@ -45,13 +46,13 @@ const connectWithRetry = async () => {
     for (let attempt = 1; attempt <= MAX_CONNECTION_RETRIES; attempt++) {
         try {
             await pool.query('SELECT NOW()');
-            console.log('Conexión con la base de datos PostgreSQL verificada.');
+            console.log('ConexiÃ³n con la base de datos PostgreSQL verificada.');
             return;
         } catch (err) {
             const delay = INITIAL_CONNECTION_RETRY_DELAY * Math.pow(2, attempt - 1);
-            console.error(`Intento ${attempt} de conexión a la base de datos falló: ${err.message}`);
+            console.error(`Intento ${attempt} de conexiÃ³n a la base de datos fallÃ³: ${err.message}`);
             if (attempt === MAX_CONNECTION_RETRIES) throw err;
-            console.log(`Reintentando conexión en ${delay / 1000} segundos...`);
+            console.log(`Reintentando conexiÃ³n en ${delay / 1000} segundos...`);
             await new Promise(res => setTimeout(res, delay));
         }
     }
@@ -107,7 +108,7 @@ const initializeDb = async () => {
     `);
     console.log('Esquema de base de datos verificado.');
   } catch (err) {
-    console.error('Error crítico al inicializar la base de datos:', err);
+    console.error('Error crÃ­tico al inicializar la base de datos:', err);
     process.exit(1);
   }
 };
@@ -115,7 +116,7 @@ const initializeDb = async () => {
 const populateDbIfNeeded = async () => {
   const res = await queryWithRetry('SELECT COUNT(*) FROM usuarios');
   if (parseInt(res.rows[0].count, 10) === 0) {
-    console.log('Base de datos vacía, poblando con datos de prueba...');
+    console.log('Base de datos vacÃ­a, poblando con datos de prueba...');
     const data = getInitialData();
     const userPromises = data.usuarios.map(user => 
       queryWithRetry('INSERT INTO usuarios (id, nombre, email, password, telefono) VALUES ($1, $2, $3, $4, $5)', [user.id, user.nombre, user.email, user.password, user.telefono])
@@ -155,7 +156,7 @@ app.post('/api/register', async (req, res) => {
   if (!nombre || !email || !password) return res.status(400).json({ error: 'Faltan campos obligatorios.' });
   try {
     const existingUser = await queryWithRetry('SELECT * FROM usuarios WHERE email = $1', [email]);
-    if (existingUser.rows.length > 0) return res.status(409).json({ error: 'El email ya está registrado.' });
+    if (existingUser.rows.length > 0) return res.status(409).json({ error: 'El email ya estÃ¡ registrado.' });
 
     const id = `u-${uuidv4()}`;
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
@@ -171,7 +172,7 @@ app.post('/api/verify', async (req, res) => {
     const { email, code } = req.body;
     try {
         const result = await queryWithRetry('SELECT * FROM usuarios WHERE email = $1 AND "verificationCode" = $2', [email, code]);
-        if (result.rows.length === 0) return res.status(400).json({ error: 'Código de verificación inválido.' });
+        if (result.rows.length === 0) return res.status(400).json({ error: 'CÃ³digo de verificaciÃ³n invÃ¡lido.' });
         
         const user = result.rows[0];
         await queryWithRetry('UPDATE usuarios SET "isVerified" = true, "verificationCode" = NULL WHERE id = $1', [user.id]);
@@ -179,7 +180,7 @@ app.post('/api/verify', async (req, res) => {
         const { password, ...userWithoutPassword } = user;
         res.status(200).json({ ...userWithoutPassword, isVerified: true });
     } catch (err) {
-        res.status(500).json({ error: 'Error al verificar el código.' });
+        res.status(500).json({ error: 'Error al verificar el cÃ³digo.' });
     }
 });
 
@@ -187,7 +188,7 @@ app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
   try {
     const result = await queryWithRetry('SELECT * FROM usuarios WHERE email = $1 AND password = $2', [email, password]);
-    if (result.rows.length === 0) return res.status(401).json({ error: 'Email o contraseña incorrectos.' });
+    if (result.rows.length === 0) return res.status(401).json({ error: 'Email o contraseÃ±a incorrectos.' });
     
     const user = result.rows[0];
     if (!user.isVerified) return res.status(403).json({ error: 'La cuenta no ha sido verificada.' });
@@ -245,7 +246,7 @@ app.post('/api/comercios/:id/opinar', async (req, res) => {
         if (result.rows.length === 0) return res.status(404).json({ error: 'Comercio no encontrado.' });
         res.json(result.rows[0]);
     } catch (err) {
-        res.status(500).json({ error: 'Error al agregar la opinión.' });
+        res.status(500).json({ error: 'Error al agregar la opiniÃ³n.' });
     }
 });
 
@@ -253,16 +254,15 @@ app.post('/api/reset-data', async (req, res) => {
   try {
     await queryWithRetry('TRUNCATE TABLE usuarios, comercios, banners, pagos, public_usuarios, analytics_events, conversations, messages CASCADE');
     await populateDbIfNeeded();
-    res.json({ message: 'Datos restaurados con éxito.' });
+    res.json({ message: 'Datos restaurados con Ã©xito.' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al restaurar los datos.' });
   }
 });
 
-// ... (otros endpoints necesarios de apiService.ts)
-
 // --- RUTA CATCH-ALL ---
+// Esta ruta debe ir al final. Sirve el index.html para cualquier ruta que no sea de la API.
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
