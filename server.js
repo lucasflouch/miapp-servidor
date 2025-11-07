@@ -5,12 +5,12 @@ const { v4: uuidv4 } = require('uuid');
 const { Pool } = require('pg');
 const path = require('path');
 
-// --- Definitive Path Correction for Render ---
-// Render runs this file from /opt/render/project/src, but our build output is in /opt/render/project/dist
-const projectRoot = path.resolve(__dirname, '..');
-const distPath = path.join(projectRoot, 'dist');
+// --- Corrección Definitiva de Rutas para Render ---
+// __dirname es el directorio donde se ejecuta este script. En Render es /opt/render/project/src
+// La carpeta 'dist' se crea en el mismo nivel por el comando 'build'.
+const distPath = path.join(__dirname, 'dist');
 
-// Now we require mockData from the correct, compiled location
+// Requerimos mockData desde su ubicación compilada dentro de 'dist'.
 const { getInitialData } = require(path.join(distPath, 'mockData.js'));
 
 const app = express();
@@ -24,8 +24,8 @@ const pool = new Pool({
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// --- Serve Static Files ---
-// Point express to the 'dist' directory at the project root
+// --- Servir Archivos Estáticos ---
+// Apuntar express al directorio 'dist' que contiene nuestra app compilada.
 app.use(express.static(distPath));
 
 
@@ -271,8 +271,8 @@ app.post('/api/reset-data', async (req, res) => {
 });
 
 // --- RUTA CATCH-ALL ---
-// This MUST be the last route. It serves the main index.html for any non-API request.
-// This is crucial for single-page applications like React Router.
+// Esta debe ser la última ruta. Sirve el index.html principal para cualquier
+// petición que no sea de la API. Es crucial para que el enrutador de React funcione.
 app.get('*', (req, res) => {
   res.sendFile(path.join(distPath, 'index.html'));
 });
