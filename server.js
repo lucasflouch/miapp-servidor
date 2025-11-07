@@ -6,9 +6,10 @@ const { Pool } = require('pg');
 const path = require('path');
 
 // --- Corrección Definitiva de Rutas para Render ---
-// __dirname es el directorio donde se ejecuta este script. En Render es /opt/render/project/src
-// La carpeta 'dist' se crea en el mismo nivel por el comando 'build'.
-const distPath = path.join(__dirname, 'dist');
+// En el entorno de Render, __dirname es /opt/render/project/src
+// La carpeta 'dist' y el 'package.json' están en la raíz, un nivel arriba.
+const projectRoot = path.join(__dirname, '..');
+const distPath = path.join(projectRoot, 'dist');
 
 // Requerimos mockData desde su ubicación compilada dentro de 'dist'.
 const { getInitialData } = require(path.join(distPath, 'mockData.js'));
