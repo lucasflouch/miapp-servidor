@@ -1,21 +1,13 @@
-
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
-const { getInitialData } = require('./mockData.js');
+const { getInitialData } = require('./src/data/mockData.js'); // Apunta al archivo JS dentro de src/data
 const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-let db = getInitialData();
-let publicUsers = []; // Simulación de base de datos de clientes
-let events = []; // Simulación de registro de eventos
-let reports = []; // Simulación de denuncias
-let conversations = [];
-let messages = [];
-
-// Habilitar CORS para todas las rutas y orígenes
+// Habilitar CORS para todas las rutas y orígenes ANTES de definir las rutas.
 app.use(cors());
 
 app.use(express.json({ limit: '10mb' }));
@@ -24,11 +16,18 @@ app.use(express.json({ limit: '10mb' }));
 const distPath = path.join(__dirname, 'dist');
 app.use(express.static(distPath));
 
+// --- BASE DE DATOS EN MEMORIA ---
+let db = getInitialData();
+let publicUsers = [];
+let events = [];
+let reports = [];
+let conversations = [];
+let messages = [];
 
 // --- ENDPOINTS DE LA API ---
 
 app.get('/api/data', (req, res) => {
-  res.json(db);
+  res.json({ ...db, publicUsers, conversations, messages });
 });
 
 app.post('/api/reset-data', (req, res) => {
@@ -69,8 +68,6 @@ app.post('/api/login', (req, res) => {
     const { email, password } = req.body;
     const user = db.usuarios.find(u => u.email === email);
     if (!user) return res.status(404).json({ error: 'El email no está registrado.' });
-    // Permitimos login sin verificación para simplificar el flujo de prueba
-    // if (!user.isVerified) return res.status(403).json({ error: 'Tu cuenta no ha sido verificada. Por favor, revisá tu email.' });
     if (user.password !== password) return res.status(401).json({ error: 'Contraseña incorrecta.' });
     const { password: _, ...userWithoutPassword } = user;
     res.status(200).json(userWithoutPassword);
@@ -85,7 +82,6 @@ app.put('/api/usuarios/:id', (req, res) => {
     const { password, ...userWithoutPassword } = db.usuarios[userIndex];
     res.status(200).json(userWithoutPassword);
 });
-
 
 // --- API DE COMERCIOS ---
 
@@ -129,18 +125,8 @@ app.post('/api/comercios/:id/opinar', (req, res) => {
     const { usuarioId, usuarioNombre, rating, texto } = req.body;
     const comercio = db.comercios.find(c => c.id === id);
     if (!comercio) return res.status(404).json({ error: 'Comercio no encontrado.' });
-    
     if (!comercio.opiniones) comercio.opiniones = [];
-    
-    const newOpinion = {
-        id: `op-${uuidv4()}`,
-        usuarioId,
-        usuarioNombre,
-        rating,
-        texto,
-        timestamp: new Date().toISOString(),
-        likes: [],
-    };
+    const newOpinion = { id: `op-${uuidv4()}`, usuarioId, usuarioNombre, rating, texto, timestamp: new Date().toISOString(), likes: [] };
     comercio.opiniones.push(newOpinion);
     res.status(201).json(comercio);
 });
@@ -163,14 +149,9 @@ app.post('/api/comercios/:comercioId/opiniones/:opinionId/like', (req, res) => {
     if (!comercio) return res.status(404).json({ error: 'Comercio no encontrado.' });
     const opinion = comercio.opiniones.find(o => o.id === opinionId);
     if (!opinion) return res.status(404).json({ error: 'Opinión no encontrada.' });
-    
     opinion.likes = opinion.likes || [];
     const likeIndex = opinion.likes.indexOf(usuarioId);
-    if (likeIndex > -1) {
-        opinion.likes.splice(likeIndex, 1);
-    } else {
-        opinion.likes.push(usuarioId);
-    }
+    if (likeIndex > -1) { opinion.likes.splice(likeIndex, 1); } else { opinion.likes.push(usuarioId); }
     res.status(200).json(comercio);
 });
 
@@ -178,9 +159,7 @@ app.post('/api/comercios/:comercioId/opiniones/:opinionId/like', (req, res) => {
 
 app.post('/api/public-register', (req, res) => {
     const { nombre, apellido, email, password, whatsapp } = req.body;
-    if (publicUsers.find(u => u.email === email)) {
-        return res.status(409).json({ error: 'El email ya está registrado.' });
-    }
+    if (publicUsers.find(u => u.email === email)) return res.status(409).json({ error: 'El email ya está registrado.' });
     const newUser = { id: `pub-${uuidv4()}`, nombre, apellido, email, password, whatsapp, favorites: [], history: [] };
     publicUsers.push(newUser);
     const { password: _, ...userToReturn } = newUser;
@@ -216,12 +195,10 @@ app.post('/api/payments/confirm-payment', (req, res) => {
     const { comercioId, newLevel } = req.body;
     const comercio = db.comercios.find(c => c.id === comercioId);
     if (!comercio) return res.status(404).json({ error: "Comercio no encontrado." });
-    
     comercio.publicidad = newLevel;
     const vencimiento = new Date();
     vencimiento.setDate(vencimiento.getDate() + 30);
     comercio.vencimientoPublicidad = vencimiento.toISOString();
-    
     res.status(200).json({ message: 'Pago confirmado y plan actualizado.' });
 });
 
@@ -229,33 +206,53 @@ app.post('/api/payments/confirm-payment', (req, res) => {
 
 app.post('/api/track', (req, res) => {
     const { comercioId, eventType, usuarioId } = req.body;
-    events.push({
-        comercioId,
-        eventType,
-        usuarioId: usuarioId || 'anonymous',
-        timestamp: new Date().toISOString()
-    });
+    events.push({ comercioId, eventType, usuarioId: usuarioId || 'anonymous', timestamp: new Date().toISOString() });
     res.status(204).send();
 });
 
 app.get('/api/analytics', (req, res) => {
-    // ... lógica de analytics que ya tenías
-    res.json({ totalEvents: { views: 100, whatsappClicks: 10, websiteClicks: 5 } });
-});
+  const { comercioId } = req.query;
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  
+  const relevantEvents = events.filter(e => e.timestamp > thirtyDaysAgo);
 
+  if (comercioId) {
+    const comercioEvents = relevantEvents.filter(e => e.comercioId === comercioId);
+    const analytics = {
+        totalViews: comercioEvents.filter(e => e.eventType === 'view').length,
+        totalWhatsappClicks: comercioEvents.filter(e => e.eventType === 'whatsapp_click').length,
+        totalWebsiteClicks: comercioEvents.filter(e => e.eventType === 'website_click').length,
+    };
+    return res.json(analytics);
+  }
+  
+  // Lógica de Admin Analytics
+  const totalEvents = {
+    views: relevantEvents.filter(e => e.eventType === 'view').length,
+    whatsappClicks: relevantEvents.filter(e => e.eventType === 'whatsapp_click').length,
+    websiteClicks: relevantEvents.filter(e => e.eventType === 'website_click').length,
+  };
+  
+  const visitsByRubro = db.rubros.map(rubro => {
+    const count = relevantEvents.filter(e => {
+        const comercio = db.comercios.find(c => c.id === e.comercioId);
+        return comercio && comercio.rubroId === rubro.id && e.eventType === 'view';
+    }).length;
+    return { rubroId: rubro.id, rubroNombre: rubro.nombre, count };
+  }).sort((a,b) => b.count - a.count);
 
-app.post('/api/reportes', (req, res) => {
-    const reportData = req.body;
-    reports.push({ id: `rep-${uuidv4()}`, ...reportData, timestamp: new Date().toISOString() });
-    res.status(201).json({ message: 'Reporte recibido.' });
+  const visitsByComercio = db.comercios.map(comercio => {
+      const count = relevantEvents.filter(e => e.comercioId === comercio.id && e.eventType === 'view').length;
+      return { comercioId: comercio.id, comercioNombre: comercio.nombre, count };
+  }).sort((a,b) => b.count - a.count).slice(0, 5);
+
+  res.json({ totalEvents, visitsByRubro, topVisitedComercios: visitsByComercio });
 });
 
 // --- RUTA CATCH-ALL ---
-// Esta ruta debe ir DESPUÉS de todos los endpoints de la API.
 app.get('*', (req, res) => {
   res.sendFile(path.join(distPath, 'index.html'));
 });
-
 
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);
