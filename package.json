@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "build": "rm -rf dist && mkdir -p dist && cp public/* dist/ && esbuild src/index.tsx --bundle --outfile=dist/index.js --loader:.tsx=tsx --external:react --external:react-dom/client --external:uuid --external:@google/genai && esbuild src/data/mockData.ts --outfile=dist/mockData.js --format=cjs"
+    "build": "rm -rf dist && mkdir -p dist && cp public/* dist/ && esbuild src/index.tsx --bundle --outfile=dist/index.js --loader:.tsx=tsx && esbuild src/data/mockData.ts --outfile=dist/mockData.js --format=cjs"
   },
   "author": "",
   "license": "ISC",
@@ -13,9 +13,13 @@
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "pg": "^8.12.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
     "uuid": "^9.0.1"
   },
   "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
     "esbuild": "^0.20.0",
     "typescript": "^5.3.3"
   },
