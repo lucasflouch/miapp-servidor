@@ -1,4 +1,4 @@
-const CACHE_NAME = 'guia-comercial-cache-v2';
+const CACHE_NAME = 'guia-comercial-cache-v3';
 const URLS_TO_CACHE = [
   '/',
   '/index.html',
@@ -42,6 +42,11 @@ self.addEventListener('activate', event => {
 // Estrategia: "Network falling back to cache". Intenta obtener el recurso de la red primero.
 // Si falla (offline), lo busca en el caché.
 self.addEventListener('fetch', event => {
+  // Ignorar las peticiones a la API para que siempre vayan a la red
+  if (event.request.url.includes('/api/')) {
+    return;
+  }
+  
   event.respondWith(
     fetch(event.request).catch(() => {
       console.log(`Petición de red fallida para ${event.request.url}. Buscando en caché.`);
