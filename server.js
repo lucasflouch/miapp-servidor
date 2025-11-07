@@ -3,8 +3,11 @@ const express = require('express');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
 const { Pool } = require('pg');
-const { getInitialData } = require('./dist/mockData.js');
 const path = require('path');
+
+// Corregimos la ruta para que funcione en el entorno de Render
+const { getInitialData } = require(path.join(__dirname, '..', 'dist', 'mockData.js'));
+
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -17,8 +20,10 @@ const pool = new Pool({
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// Servir archivos estáticos desde la carpeta 'dist'
-app.use(express.static(path.join(__dirname, 'dist')));
+// Corregimos la ruta para servir archivos estáticos desde la carpeta 'dist' en la raíz del proyecto
+const distPath = path.join(__dirname, '..', 'dist');
+app.use(express.static(distPath));
+
 
 const AD_PRICES = { 1: 0, 2: 1500, 3: 3000, 4: 5000, 5: 8000, 6: 12000 };
 const ADMIN_EMAIL = 'admin@guiacomercial.com';
@@ -263,8 +268,9 @@ app.post('/api/reset-data', async (req, res) => {
 
 // --- RUTA CATCH-ALL ---
 // Esta ruta debe ir al final. Sirve el index.html para cualquier ruta que no sea de la API.
+// Corregimos la ruta para que funcione en el entorno de Render
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+  res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
 });
 
 const startServer = async () => {
