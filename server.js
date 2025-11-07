@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
 const { Pool } = require('pg');
-const { getInitialData } = require('./src/data/mockData.js'); // Actualizado a la nueva ruta
+const { getInitialData } = require('./mockData.js'); // RUTA CORREGIDA
 const path = require('path');
 
 const app = express();
