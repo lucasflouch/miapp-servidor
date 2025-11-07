@@ -7,8 +7,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Guía de Comercios Locales</title>
 
-    <!-- PWA Manifest -->
-    <link rel="manifest" href="/manifest.json" />
+    <!-- PWA Manifest (temporalmente desactivado para limpiar caché) -->
+    <!-- <link rel="manifest" href="/manifest.json" /> -->
     <meta name="theme-color" content="#4f46e5" />
     
     <script src="https://cdn.tailwindcss.com"></script>
@@ -81,19 +81,6 @@
   <body class="bg-gray-50">
     <div id="root"></div>
     <script type="module" src="./index.js"></script>
-    <script>
-      // Service Worker Registration
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/service-worker.js')
-            .then(registration => {
-              console.log('ServiceWorker registrado con éxito:', registration.scope);
-            })
-            .catch(error => {
-              console.log('Error en el registro de ServiceWorker:', error);
-            });
-        });
-      }
-    </script>
+    <!-- Service Worker (temporalmente desactivado para limpiar caché) -->
   </body>
 </html>
