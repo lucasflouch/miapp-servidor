@@ -4,7 +4,8 @@
   "description": "Backend para la aplicación GuíaComercial",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "build": "mkdir -p dist && cp index.html manifest.json service-worker.js dist/ && cp -r icons dist/ && esbuild index.tsx --bundle --outfile=dist/index.js --loader:.tsx=tsx"
   },
   "author": "",
   "license": "ISC",
@@ -13,6 +14,10 @@
     "express": "^4.19.2",
     "pg": "^8.12.0",
     "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.20.0",
+    "typescript": "^5.3.3"
   },
   "engines": {
     "node": "20.x"
