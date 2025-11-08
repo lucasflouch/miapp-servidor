@@ -2,11 +2,13 @@
 const express = require('express');
 const cors = require('cors');
 const path =require('path');
-const { v4: uuidv4 } = require('uuid');
 const { getInitialData } = require('./data.js');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Helper para generar IDs únicos sin dependencias externas
+const generateId = () => Date.now().toString(36) + Math.random().toString(36).substring(2);
 
 // --- IN-MEMORY DATABASE ---
 let db = getInitialData();
@@ -99,7 +101,7 @@ app.post('/api/public-register', (req, res) => {
         return res.status(409).json({ error: 'El email ya está registrado.' });
     }
     const newPublicUser = {
-        id: `pub-${uuidv4()}`,
+        id: `pub-${generateId()}`,
         nombre,
         apellido,
         email,
@@ -187,7 +189,7 @@ app.post('/api/comercios/:comercioId/opinar', (req, res) => {
     
     const newOpinion = {
         ...opinionData,
-        id: `op-${uuidv4()}`,
+        id: `op-${generateId()}`,
         timestamp: new Date().toISOString(),
         likes: []
     };
@@ -271,7 +273,7 @@ app.post('/api/payments/confirm-payment', (req, res) => {
     comercio.vencimientoPublicidad = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
     
     const newPago = {
-        id: `pay-${uuidv4()}`,
+        id: `pay-${generateId()}`,
         comercioId: comercio.id,
         monto: AD_PRICES[newLevel] || 0,
         fecha: new Date().toISOString(),
@@ -311,7 +313,7 @@ app.post('/api/conversations/start', (req, res) => {
     if (!cliente || !comercio) return res.status(404).json({ error: 'Cliente o comercio no encontrado' });
 
     const newConvo = {
-        id: `conv-${uuidv4()}`,
+        id: `conv-${generateId()}`,
         clienteId,
         comercioId,
         clienteNombre: `${cliente.nombre} ${cliente.apellido}`,
@@ -339,7 +341,7 @@ app.post('/api/messages', (req, res) => {
     if (!conversation) return res.status(404).json({ error: 'Conversación no encontrada' });
     
     const newMessage = {
-        id: `msg-${uuidv4()}`,
+        id: `msg-${generateId()}`,
         conversationId,
         senderId,
         content,

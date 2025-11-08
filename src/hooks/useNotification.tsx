@@ -1,6 +1,5 @@
 import React, { createContext, useState, useContext, ReactNode, useCallback } from 'react';
 import Notification from '../components/Notification';
-import { v4 as uuidv4 } from 'uuid';
 
 type NotificationType = 'info' | 'success' | 'warning' | 'error';
 
@@ -33,7 +32,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
 
   const showNotification = useCallback((message: string, type: NotificationType = 'info') => {
     const newNotification: NotificationData = {
-      id: uuidv4(),
+      id: `notif-${Date.now()}`,
       message,
       type,
     };
