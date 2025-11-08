@@ -15,11 +15,13 @@ const AD_PRICES = { 1: 0, 2: 1500, 3: 3000, 4: 5000, 5: 8000, 6: 12000 };
 const ADMIN_EMAIL = 'admin@guiacomercial.com';
 
 // --- MIDDLEWARES ---
+// Se aplican antes para todas las rutas
 app.use(cors());
 app.use(express.json({ limit: '10mb' })); // Aumentado el límite para las imágenes en base64
-app.use(express.static(path.join(__dirname, 'dist')));
+
 
 // --- API ENDPOINTS ---
+// Todas las rutas de la API se definen ANTES de servir los archivos estáticos.
 
 // GET /api/data - Obtener todos los datos
 app.get('/api/data', (req, res) => {
@@ -382,8 +384,11 @@ app.post('/api/conversations/:conversationId/read', (req, res) => {
 });
 
 
+// --- SERVIR ARCHIVOS ESTÁTICOS Y RUTA CATCH-ALL ---
+// Esto debe ir DESPUÉS de las rutas de la API
 
-// --- RUTA CATCH-ALL PARA SPA ---
+app.use(express.static(path.join(__dirname, 'dist')));
+
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
