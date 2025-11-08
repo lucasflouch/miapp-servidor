@@ -1,8 +1,3 @@
-
-
-
-
-
 import React, { useState, FormEvent, useMemo, ChangeEvent, DragEvent, useRef, useEffect } from 'react';
 import { Provincia, Ciudad, Rubro, SubRubro, Comercio, Opinion } from '../types';
 import { AD_TIERS } from '../constants';
@@ -10,6 +5,7 @@ import { AD_TIERS } from '../constants';
 
 interface CreateComercioPageProps {
   provincias: Provincia[];
+  ciudades: Ciudad[];
   rubros: Rubro[];
   subRubros: SubRubro[];
   onCreate: (comercioData: Omit<Comercio, 'id' | 'usuarioId'>) => void;
@@ -30,7 +26,7 @@ const CheckIcon: React.FC = () => (
 );
 
 
-const CreateComercioPage: React.FC<CreateComercioPageProps> = ({ provincias, rubros, subRubros, onCreate }) => {
+const CreateComercioPage: React.FC<CreateComercioPageProps> = ({ provincias, ciudades, rubros, subRubros, onCreate }) => {
   const [formData, setFormData] = useState<FormData>({
     nombre: '',
     imagenUrl: '',
@@ -51,9 +47,6 @@ const CreateComercioPage: React.FC<CreateComercioPageProps> = ({ provincias, rub
   });
   
   const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [availableCiudades, setAvailableCiudades] = useState<Ciudad[]>([]);
-  const [loadingCiudades, setLoadingCiudades] = useState(false);
-  const [availableSubRubros, setAvailableSubRubros] = useState<SubRubro[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isGalleryDragging, setIsGalleryDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -92,30 +85,14 @@ const CreateComercioPage: React.FC<CreateComercioPageProps> = ({ provincias, rub
     setErrors(validate(formData));
   }, [formData]);
 
-  // Carga las ciudades de la provincia por defecto al iniciar la página
-  useEffect(() => {
-    const fetchDefaultCities = async () => {
-        if (formData.provinciaId && availableCiudades.length === 0) {
-            setLoadingCiudades(true);
-            try {
-                const response = await fetch(`https://apis.datos.gob.ar/georef/api/v2.0/municipios?provincia=${formData.provinciaId}&campos=id,nombre&max=5000&orden=nombre`);
-                if (!response.ok) throw new Error('Failed to fetch default cities');
-                const data = await response.json();
-                const mappedCiudades: Ciudad[] = data.municipios.map((loc: any) => ({
-                    id: loc.id,
-                    nombre: loc.nombre,
-                    provinciaId: formData.provinciaId,
-                }));
-                setAvailableCiudades(mappedCiudades);
-            } catch (error) {
-                console.error("Error fetching default cities:", error);
-            } finally {
-                setLoadingCiudades(false);
-            }
-        }
-    };
-    fetchDefaultCities();
-  }, []); // El array vacío asegura que solo se ejecute al montar el componente
+  const availableCiudades = useMemo(() => {
+    return ciudades.filter(c => c.provinciaId === formData.provinciaId).sort((a,b) => a.nombre.localeCompare(b.nombre));
+  }, [formData.provinciaId, ciudades]);
+
+  const availableSubRubros = useMemo(() => {
+    return subRubros.filter(sr => sr.rubroId === formData.rubroId);
+  }, [formData.rubroId, subRubros]);
+
   
   const processFile = (file: File | null) => {
     if (!file) return;
@@ -214,37 +191,11 @@ const CreateComercioPage: React.FC<CreateComercioPageProps> = ({ provincias, rub
   const handleRubroChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newRubroId = e.target.value;
     setFormData(prev => ({...prev, rubroId: newRubroId, subRubroId: ''}));
-    if (newRubroId) {
-        setAvailableSubRubros(subRubros.filter(sr => sr.rubroId === newRubroId));
-    } else {
-        setAvailableSubRubros([]);
-    }
   };
 
-  const handleProvinciaChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleProvinciaChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newProvinciaId = e.target.value;
     setFormData(prev => ({ ...prev, provinciaId: newProvinciaId, ciudadId: '', barrio: '' }));
-    setAvailableCiudades([]);
-
-    if (newProvinciaId) {
-      setLoadingCiudades(true);
-      try {
-        const response = await fetch(`https://apis.datos.gob.ar/georef/api/v2.0/municipios?provincia=${newProvinciaId}&campos=id,nombre&max=5000&orden=nombre`);
-        if (!response.ok) throw new Error('Failed to fetch cities');
-        const data = await response.json();
-        const mappedCiudades: Ciudad[] = data.municipios.map((loc: any) => ({
-          id: loc.id,
-          nombre: loc.nombre,
-          provinciaId: newProvinciaId,
-        }));
-        setAvailableCiudades(mappedCiudades);
-      } catch (error) {
-        console.error("Error fetching cities:", error);
-        alert("No se pudieron cargar las ciudades para la provincia seleccionada.");
-      } finally {
-        setLoadingCiudades(false);
-      }
-    }
   };
 
   const handleSubmit = (e: FormEvent) => {
@@ -349,8 +300,8 @@ const CreateComercioPage: React.FC<CreateComercioPageProps> = ({ provincias, rub
                   </div>
                   <div>
                     <label htmlFor="ciudadId" className="block text-sm font-medium text-gray-700">Ciudad</label>
-                    <select name="ciudadId" id="ciudadId" value={formData.ciudadId} onChange={handleChange} disabled={!formData.provinciaId || loadingCiudades} className={`mt-1 block w-full border ${errors.ciudadId ? 'border-red-500' : 'border-gray-300'} rounded-md shadow-sm py-2 px-3 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100`} required>
-                      <option value="">{loadingCiudades ? 'Cargando...' : 'Seleccione...'}</option>
+                    <select name="ciudadId" id="ciudadId" value={formData.ciudadId} onChange={handleChange} disabled={!formData.provinciaId} className={`mt-1 block w-full border ${errors.ciudadId ? 'border-red-500' : 'border-gray-300'} rounded-md shadow-sm py-2 px-3 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100`} required>
+                      <option value="">Seleccione...</option>
                       {availableCiudades.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                     </select>
                      {errors.ciudadId && <p className="mt-1 text-sm text-red-600">{errors.ciudadId}</p>}

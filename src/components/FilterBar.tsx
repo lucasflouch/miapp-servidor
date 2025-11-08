@@ -12,13 +12,14 @@ interface Filters {
 
 interface FilterBarProps {
   provincias: Provincia[];
+  ciudades: Ciudad[]; // Nueva prop
   rubros: Rubro[];
   subRubros: SubRubro[];
   onSearch: (filters: Filters) => void;
   onLocationSearch: (coords: { lat: number; lon: number }) => void;
 }
 
-const FilterBar: React.FC<FilterBarProps> = ({ provincias, rubros, subRubros, onSearch, onLocationSearch }) => {
+const FilterBar: React.FC<FilterBarProps> = ({ provincias, ciudades, rubros, subRubros, onSearch, onLocationSearch }) => {
   const [selectedProvincia, setSelectedProvincia] = useState('06'); // ID por defecto para Buenos Aires
   const [selectedCiudad, setSelectedCiudad] = useState('060364'); // ID corregido para General Rodríguez
   const [selectedRubro, setSelectedRubro] = useState('');
@@ -26,54 +27,27 @@ const FilterBar: React.FC<FilterBarProps> = ({ provincias, rubros, subRubros, on
   const [searchName, setSearchName] = useState('');
   const [searchBarrio, setSearchBarrio] = useState(''); // Nuevo estado
   
-  const [availableCiudades, setAvailableCiudades] = useState<Ciudad[]>([]);
-  const [loadingCiudades, setLoadingCiudades] = useState(false);
-  const [availableSubRubros, setAvailableSubRubros] = useState<SubRubro[]>([]);
   const [isLocating, setIsLocating] = useState(false);
 
-  // Efecto para cargar ciudades cuando cambia la provincia
-  useEffect(() => {
-    const fetchCiudades = async () => {
-      if (!selectedProvincia) {
-        setAvailableCiudades([]);
-        setSelectedCiudad('');
-        return;
-      }
-      
-      setLoadingCiudades(true);
-      setAvailableCiudades([]);
-      // No reseteamos la ciudad seleccionada aquí para permitir el valor por defecto
-      
-      try {
-        const response = await fetch(`https://apis.datos.gob.ar/georef/api/v2.0/municipios?provincia=${selectedProvincia}&campos=id,nombre&max=5000&orden=nombre`);
-        if (!response.ok) throw new Error('Failed to fetch cities from API');
-        const data = await response.json();
-        const mappedCiudades: Ciudad[] = data.municipios.map((loc: any) => ({
-          id: loc.id,
-          nombre: loc.nombre,
-          provinciaId: selectedProvincia,
-        }));
-        setAvailableCiudades(mappedCiudades);
-      } catch (error) {
-        console.error("Error fetching cities for filter bar:", error);
-        alert("No se pudieron cargar las ciudades para la provincia seleccionada.");
-      } finally {
-        setLoadingCiudades(false);
-      }
-    };
-    
-    fetchCiudades();
-  }, [selectedProvincia]);
+  // Deriva las ciudades disponibles desde las props, en lugar de hacer un fetch
+  const availableCiudades = useMemo(() => {
+    if (!selectedProvincia) {
+      return [];
+    }
+    return ciudades.filter(c => c.provinciaId === selectedProvincia).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  }, [selectedProvincia, ciudades]);
 
-  // Efecto para actualizar sub-rubros cuando cambia el rubro
-  useEffect(() => {
-      if (selectedRubro) {
-          setAvailableSubRubros(subRubros.filter(sr => sr.rubroId === selectedRubro));
-      } else {
-          setAvailableSubRubros([]);
-      }
-      setSelectedSubRubro('');
+  const availableSubRubros = useMemo(() => {
+    if (selectedRubro) {
+        return subRubros.filter(sr => sr.rubroId === selectedRubro);
+    }
+    return [];
   }, [selectedRubro, subRubros]);
+  
+  // Limpia el sub-rubro cuando cambia el rubro
+  useEffect(() => {
+      setSelectedSubRubro('');
+  }, [selectedRubro]);
   
   const handleSearch = () => {
     onSearch({
@@ -85,7 +59,7 @@ const FilterBar: React.FC<FilterBarProps> = ({ provincias, rubros, subRubros, on
       barrio: searchBarrio,
     });
   };
-
+  
   const handleLocationSearch = () => {
     if (!navigator.geolocation) {
       alert("La geolocalización no es soportada por tu navegador.");
@@ -106,6 +80,7 @@ const FilterBar: React.FC<FilterBarProps> = ({ provincias, rubros, subRubros, on
       }
     );
   };
+  
   
   const handleReset = () => {
     // Al limpiar, volvemos a los valores por defecto
@@ -138,9 +113,9 @@ const FilterBar: React.FC<FilterBarProps> = ({ provincias, rubros, subRubros, on
         <div>
           <label htmlFor="ciudad" className="text-sm font-medium text-gray-700 mb-1 block">Ciudad</label>
           <select id="ciudad" value={selectedCiudad} onChange={(e) => setSelectedCiudad(e.target.value)}
-            disabled={!selectedProvincia || loadingCiudades}
+            disabled={!selectedProvincia}
             className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100">
-            <option value="">{loadingCiudades ? 'Cargando...' : 'Todas'}</option>
+            <option value="">Todas</option>
             {availableCiudades.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
           </select>
         </div>
@@ -184,11 +159,12 @@ const FilterBar: React.FC<FilterBarProps> = ({ provincias, rubros, subRubros, on
          <button onClick={handleSearch} className="w-full bg-indigo-600 text-white px-4 py-3 rounded-md font-semibold hover:bg-indigo-700 transition-colors">
             Buscar
           </button>
-          <button onClick={handleLocationSearch} disabled={isLocating} className="w-full bg-blue-600 text-white px-4 py-3 rounded-md font-semibold hover:bg-blue-700 transition-colors flex items-center justify-center disabled:bg-blue-400">
-            {isLocating ? (
-              <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-            ) : '📍'}
-            {isLocating ? 'Buscando...' : 'Buscar Cerca de Mí'}
+          <button 
+            onClick={handleLocationSearch} 
+            disabled={isLocating} 
+            className="w-full bg-blue-500 text-white px-4 py-3 rounded-md font-semibold flex items-center justify-center hover:bg-blue-600 disabled:bg-blue-300"
+          >
+            {isLocating ? 'Buscando...' : '📍 Buscar Cerca de Mí'}
           </button>
           <button onClick={handleReset} className="w-full bg-gray-600 text-white px-4 py-3 rounded-md font-semibold hover:bg-gray-700 transition-colors">
             Limpiar Filtros

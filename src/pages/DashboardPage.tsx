@@ -1,5 +1,3 @@
-
-
 import React, { useState, FormEvent, useMemo, useEffect, ChangeEvent, DragEvent, useRef } from 'react';
 import { Comercio, Provincia, Ciudad, Rubro, SubRubro, AnalyticsData, Usuario } from '../types';
 import { AD_TIERS } from '../constants';
@@ -44,13 +42,14 @@ const AnalyticsDisplay: React.FC<AnalyticsDisplayProps> = ({ analytics, loading 
 interface EditFormProps {
   comercio: Comercio;
   provincias: Provincia[];
+  ciudades: Ciudad[];
   rubros: Rubro[];
   subRubros: SubRubro[];
   onUpdate: (comercio: Comercio) => Promise<boolean>;
   onCancel: () => void;
 }
 
-const EditForm: React.FC<EditFormProps> = ({ comercio, provincias, rubros, subRubros, onUpdate, onCancel }) => {
+const EditForm: React.FC<EditFormProps> = ({ comercio, provincias, ciudades, rubros, subRubros, onUpdate, onCancel }) => {
   const [formData, setFormData] = useState<Comercio>(comercio);
   const [isSaving, setIsSaving] = useState(false);
   const [imagePreview, setImagePreview] = useState<string>(comercio.imagenUrl);
@@ -60,10 +59,6 @@ const EditForm: React.FC<EditFormProps> = ({ comercio, provincias, rubros, subRu
   const galleryFileInputRef = useRef<HTMLInputElement>(null);
   const [errors, setErrors] = useState<Partial<Record<keyof Comercio, string>>>({});
   
-  const [availableCiudades, setAvailableCiudades] = useState<Ciudad[]>([]);
-  const [loadingCiudades, setLoadingCiudades] = useState(false);
-  const [availableSubRubros, setAvailableSubRubros] = useState<SubRubro[]>([]);
-
   const MAX_GALLERY_IMAGES = 5;
 
   // Lógica de validación
@@ -88,24 +83,13 @@ const EditForm: React.FC<EditFormProps> = ({ comercio, provincias, rubros, subRu
 
   const isFormValid = useMemo(() => Object.keys(validate(formData)).length === 0, [formData]);
 
-  // Efecto para cargar ciudades y sub-rubros iniciales
-  useEffect(() => {
-    const fetchInitialData = async () => {
-      if (formData.provinciaId) {
-        setLoadingCiudades(true);
-        try {
-          const res = await fetch(`https://apis.datos.gob.ar/georef/api/v2.0/municipios?provincia=${formData.provinciaId}&campos=id,nombre&max=5000&orden=nombre`);
-          const data = await res.json();
-          setAvailableCiudades(data.municipios.map((loc: any) => ({ id: loc.id, nombre: loc.nombre, provinciaId: formData.provinciaId })));
-        } catch (err) { console.error(err); } 
-        finally { setLoadingCiudades(false); }
-      }
-      if (formData.rubroId) {
-        setAvailableSubRubros(subRubros.filter(sr => sr.rubroId === formData.rubroId));
-      }
-    };
-    fetchInitialData();
-  }, [formData.provinciaId, formData.rubroId, subRubros]);
+  const availableCiudades = useMemo(() => {
+    return ciudades.filter(c => c.provinciaId === formData.provinciaId).sort((a,b) => a.nombre.localeCompare(b.nombre));
+  }, [formData.provinciaId, ciudades]);
+
+  const availableSubRubros = useMemo(() => {
+    return subRubros.filter(sr => sr.rubroId === formData.rubroId);
+  }, [formData.rubroId, subRubros]);
 
 
   const processFile = (file: File | null) => {
@@ -161,15 +145,10 @@ const EditForm: React.FC<EditFormProps> = ({ comercio, provincias, rubros, subRu
   const handleRubroChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newRubroId = e.target.value;
     setFormData(prev => ({...prev, rubroId: newRubroId, subRubroId: ''}));
-    if (newRubroId) {
-        setAvailableSubRubros(subRubros.filter(sr => sr.rubroId === newRubroId));
-    } else {
-        setAvailableSubRubros([]);
-    }
   };
 
 
-  const handleProvinciaChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleProvinciaChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newProvinciaId = e.target.value;
     const newProvincia = provincias.find(p => p.id === newProvinciaId);
     
@@ -181,21 +160,6 @@ const EditForm: React.FC<EditFormProps> = ({ comercio, provincias, rubros, subRu
       ciudadNombre: '',
       barrio: '',
     }));
-    
-    setAvailableCiudades([]);
-
-    if (newProvinciaId) {
-      setLoadingCiudades(true);
-      try {
-        const response = await fetch(`https://apis.datos.gob.ar/georef/api/v2.0/municipios?provincia=${newProvinciaId}&campos=id,nombre&max=5000&orden=nombre`);
-        const data = await response.json();
-        setAvailableCiudades(data.municipios.map((loc: any) => ({ id: loc.id, nombre: loc.nombre, provinciaId: newProvinciaId })));
-      } catch (error) {
-        console.error("Error fetching cities:", error);
-      } finally {
-        setLoadingCiudades(false);
-      }
-    }
   };
 
   const handleCiudadChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -336,8 +300,8 @@ const EditForm: React.FC<EditFormProps> = ({ comercio, provincias, rubros, subRu
                 </div>
                 <div>
                   <label htmlFor="ciudadId" className="block text-sm font-medium text-gray-700">Ciudad</label>
-                  <select name="ciudadId" id="ciudadId" value={formData.ciudadId} onChange={handleCiudadChange} disabled={loadingCiudades} className={`mt-1 block w-full border ${errors.ciudadId ? 'border-red-500' : 'border-gray-300'} rounded-md shadow-sm py-2 px-3 disabled:bg-gray-100`} required>
-                    <option value="">{loadingCiudades ? 'Cargando...' : 'Seleccione...'}</option>
+                  <select name="ciudadId" id="ciudadId" value={formData.ciudadId} onChange={handleCiudadChange} disabled={availableCiudades.length === 0} className={`mt-1 block w-full border ${errors.ciudadId ? 'border-red-500' : 'border-gray-300'} rounded-md shadow-sm py-2 px-3 disabled:bg-gray-100`} required>
+                    <option value="">Seleccione...</option>
                     {availableCiudades.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                   </select>
                   {errors.ciudadId && <p className="mt-1 text-sm text-red-600">{errors.ciudadId}</p>}
@@ -415,6 +379,7 @@ interface DashboardPageProps {
   currentUser: Usuario;
   comercios: Comercio[];
   provincias: Provincia[];
+  ciudades: Ciudad[];
   rubros: Rubro[];
   subRubros: SubRubro[];
   onUpdate: (comercio: Comercio) => Promise<boolean>;
@@ -426,7 +391,7 @@ interface DashboardPageProps {
   onNavigateToChat: () => void;
 }
 
-const DashboardPage: React.FC<DashboardPageProps> = ({ currentUser, comercios, provincias, rubros, subRubros, onUpdate, onDelete, onCreateNew, onNavigateToAccount, onPreviewComercio, onNavigateToPromote, onNavigateToChat }) => {
+const DashboardPage: React.FC<DashboardPageProps> = ({ currentUser, comercios, provincias, ciudades, rubros, subRubros, onUpdate, onDelete, onCreateNew, onNavigateToAccount, onPreviewComercio, onNavigateToPromote, onNavigateToChat }) => {
   const [editingComercio, setEditingComercio] = useState<Comercio | null>(null);
   const [comercioToDelete, setComercioToDelete] = useState<Comercio | null>(null);
   const [analyticsData, setAnalyticsData] = useState<Record<string, AnalyticsData | null>>({});
@@ -477,6 +442,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ currentUser, comercios, p
       <EditForm 
         comercio={editingComercio}
         provincias={provincias}
+        ciudades={ciudades}
         rubros={rubros}
         subRubros={subRubros}
         onUpdate={onUpdate}
