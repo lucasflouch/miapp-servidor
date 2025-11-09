@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "build": "rm -rf dist && mkdir dist && cp public/* dist/ && esbuild src/index.tsx --bundle --outfile=dist/index.js --loader:.tsx=tsx --external:react --external:react-dom"
+    "build": "rimraf dist && mkdir dist && npx copyfiles -u 1 public/**/* dist && npx postcss src/index.css -o dist/output.css --verbose && npx esbuild src/index.tsx --bundle --outfile=dist/index.js --loader:.tsx=tsx"
   },
   "author": "",
   "license": "ISC",
@@ -17,9 +17,16 @@
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.17",
     "@types/react": "^18.0.28",
     "@types/react-dom": "^18.0.11",
+    "autoprefixer": "^10.4.21",
+    "copyfiles": "^2.4.1",
     "esbuild": "^0.17.18",
+    "postcss": "^8.5.6",
+    "postcss-cli": "^11.0.1",
+    "rimraf": "^6.1.0",
+    "tailwindcss": "^4.1.17",
     "typescript": "^5.0.4"
   },
   "engines": {
